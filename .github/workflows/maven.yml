@@ -1,0 +1,44 @@
+name: maven
+on: [pull_request, push, workflow_dispatch]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # Use these Java versions
+        java: [8, 11, 17]
+        # and run on both Linux and Windows
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    if: github.ref != 'refs/heads/gh-pages'
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v2.1.0
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: zulu
+      - name: Checkout Maven repository
+        uses: actions/checkout@v2
+        if: ${{ matrix.java == 8 && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref_type != 'tag' }}
+        with:
+          repository: BananaLang/maven
+          token: ${{ secrets.API_TOKEN }}
+          path: target/mvn-repo
+      - name: Build with Maven
+        run: mvn deploy
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        if: ${{ matrix.java == 8 && matrix.os == 'ubuntu-latest' }}
+        with:
+          name: javabanana-jar-artifact
+          path: target/JavaBanana-*.jar
+      - name: Push to Maven repository
+        if: ${{ matrix.java == 8 && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref_type != 'tag' }}
+        run: |
+          cd target/mvn-repo
+          git config --local user.email "action@github.com"
+          git config --local user.name "actions-user"
+          git add .
+          git commit -m "Update for https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          git push
