@@ -23,6 +23,7 @@ import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.VariableDeclaration;
+import io.github.bananalang.typecheck.Imported.ImportType;
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtMethod;
@@ -30,17 +31,11 @@ import javassist.NotFoundException;
 
 public final class Typechecker {
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
-    private final List<ImportedName> imports = new ArrayList<>();
+    private final List<Imported<?>> imports = new ArrayList<>();
     private final ClassPool cp;
     private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
     private Map<String, EvaluatedType> currentScope = null;
-
-    {
-        imports.add(ImportedName.className("java.lang.Class"));
-        imports.add(ImportedName.className("java.lang.Object"));
-        imports.add(ImportedName.className("java.lang.String"));
-    }
 
     public Typechecker(ClassPool cp) {
         this.cp = cp;
@@ -51,18 +46,27 @@ public final class Typechecker {
     }
 
     public EvaluatedType typecheck(ASTNode root) {
+        evaluateImports(root);
+        return typecheck0(root);
+    }
+
+    public EvaluatedType getType(ASTNode node) {
+        return types.get(node);
+    }
+
+    private EvaluatedType typecheck0(ASTNode root) {
         if (root instanceof StatementList) {
             StatementList sl = (StatementList)root;
             scopeStack.addLast(sl);
             scopes.put(sl, currentScope = new LinkedHashMap<>());
             for (StatementNode stmt : sl.children) {
-                typecheck(stmt);
+                typecheck0(stmt);
             }
             scopeStack.removeLast();
             currentScope = scopeStack.isEmpty() ? null : scopes.get(scopeStack.peekLast());
         } else if (root instanceof ExpressionStatement) {
             ExpressionStatement es = (ExpressionStatement)root;
-            typecheck(es.expression);
+            evaluateExpression(es.expression);
         } else if (root instanceof VariableDeclarationStatement) {
             VariableDeclarationStatement vds = (VariableDeclarationStatement)root;
             EvaluatedType[] declTypes = new EvaluatedType[vds.declarations.length];
@@ -85,14 +89,23 @@ public final class Typechecker {
         return getType(root);
     }
 
-    public EvaluatedType getType(ASTNode node) {
-        return types.get(node);
+    private void evaluateImports(ASTNode root) {
+        imports.add(Imported.class_(cp, "java.lang.Class"));
+        imports.add(Imported.class_(cp, "java.lang.Object"));
+        imports.add(Imported.class_(cp, "java.lang.String"));
+        try {
+            imports.addAll(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
+        } catch (IllegalArgumentException e) {
+            // No stdlib installed
+        }
     }
 
     private EvaluatedType evaluateTypeIdentifier(String identifier) {
-        for (ImportedName imported : imports) {
-            if (imported.getClassName().equals(identifier)) {
-                return new EvaluatedType(cp, imported.getQualName());
+        for (Imported<?> imported : imports) {
+            if (imported.getType() == ImportType.CLASS && imported.getShortName().equals(identifier)) {
+                @SuppressWarnings("unchecked")
+                Imported<CtClass> classImport = (Imported<CtClass>)imported;
+                return new EvaluatedType(classImport.getObject());
             }
         }
         throw new IllegalArgumentException("Could not find class " + identifier);
@@ -101,16 +114,31 @@ public final class Typechecker {
     private EvaluatedType evaluateExpression(ExpressionNode expr) {
         if (expr instanceof CallExpression) {
             CallExpression ce = (CallExpression)expr;
+            CtClass[] argTypes = new CtClass[ce.args.length];
+            for (int i = 0; i < ce.args.length; i++) {
+                argTypes[i] = evaluateExpression(ce.args[i]).getJavassist();
+            }
             CtMethod method = null;
             if (ce.target instanceof AccessExpression) {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
                 CtClass clazz = targetType.getJavassist();
-                CtClass[] argTypes = new CtClass[ce.args.length];
-                for (int i = 0; i < ce.args.length; i++) {
-                    argTypes[i] = evaluateExpression(ce.args[i]).getJavassist();
+                method = findMethod(clazz, ae.name, false, argTypes);
+            } else if (ce.target instanceof IdentifierExpression) {
+                IdentifierExpression ie = (IdentifierExpression)ce.target;
+                for (Imported<?> imported : imports) {
+                    if (imported.getType() != ImportType.STATIC_METHOD) continue;
+                    @SuppressWarnings("unchecked")
+                    Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
+                    if (methodImport.getShortName().equals(ie.identifier)) {
+                        try {
+                            method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), null, true, argTypes);
+                        } catch (NotFoundException e) {
+                            throw new IllegalArgumentException(e);
+                        }
+                        break;
+                    }
                 }
-                method = findMethod(clazz, ae.name, argTypes);
             }
             if (method == null) {
                 throw new IllegalArgumentException("Could not find method associated with " + ce);
@@ -143,32 +171,31 @@ public final class Typechecker {
         return getType(expr);
     }
 
-    private static CtMethod findMethod(CtClass clazz, String name, CtClass... argTypes) {
-        CtMethod[] result = new CtMethod[1];
-        if (!forEachSuperclass(clazz, superClazz -> {
-            try {
-                methodCheckLoop:
-                for (CtMethod maybe : clazz.getDeclaredMethods(name)) {
-                    if (!isAccessible(maybe)) continue;
-                    CtClass[] methodParamTypes = maybe.getParameterTypes();
-                    if (methodParamTypes.length != argTypes.length) continue;
-                    for (int i = 0; i < methodParamTypes.length; i++) {
-                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
-                            continue methodCheckLoop;
-                        }
+    private static CtMethod findMethod(CtMethod[] methods, String name, boolean staticOnly, CtClass... argTypes) {
+        try {
+            methodCheckLoop:
+            for (CtMethod maybe : methods) {
+                if (name != null && !maybe.getName().equals(name)) continue;
+                if (!isAccessible(maybe)) continue;
+                if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
+                CtClass[] methodParamTypes = maybe.getParameterTypes();
+                if (methodParamTypes.length != argTypes.length) continue;
+                for (int i = 0; i < methodParamTypes.length; i++) {
+                    if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
+                        continue methodCheckLoop;
                     }
-                    result[0] = maybe;
-                    return true;
                 }
-            } catch (NotFoundException e) {
-                throw new IllegalArgumentException(e);
+                return maybe;
             }
-            return false;
-        })) {
-            String argStr = Arrays.toString(argTypes);
-            throw new IllegalArgumentException("Unable to find method " + name + "(" + argStr.substring(1, argStr.length() - 1) + ")");
+        } catch (NotFoundException e) {
+            throw new IllegalArgumentException(e);
         }
-        return result[0];
+        String argStr = Arrays.toString(argTypes);
+        throw new IllegalArgumentException("Unable to find method " + name + "(" + argStr.substring(1, argStr.length() - 1) + ")");
+    }
+
+    private static CtMethod findMethod(CtClass clazz, String name, boolean staticOnly, CtClass... argTypes) {
+        return findMethod(clazz.getMethods(), name, staticOnly, argTypes);
     }
 
     private static boolean isAccessible(CtMethod method) {
