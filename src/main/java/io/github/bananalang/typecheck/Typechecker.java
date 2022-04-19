@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -15,6 +17,7 @@ import io.github.bananalang.parse.ast.AccessExpression;
 import io.github.bananalang.parse.ast.CallExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
+import io.github.bananalang.parse.ast.IdentifierExpression;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
@@ -28,7 +31,10 @@ import javassist.NotFoundException;
 public final class Typechecker {
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final List<ImportedName> imports = new ArrayList<>();
-    private final ClassPool cp = ClassPool.getDefault();
+    private final ClassPool cp;
+    private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
+    private final Deque<StatementList> scopeStack = new ArrayDeque<>();
+    private Map<String, EvaluatedType> currentScope = null;
 
     {
         imports.add(ImportedName.className("java.lang.Class"));
@@ -36,15 +42,24 @@ public final class Typechecker {
         imports.add(ImportedName.className("java.lang.String"));
     }
 
+    public Typechecker(ClassPool cp) {
+        this.cp = cp;
+    }
+
     public Typechecker() {
+        this(ClassPool.getDefault());
     }
 
     public EvaluatedType typecheck(ASTNode root) {
         if (root instanceof StatementList) {
             StatementList sl = (StatementList)root;
+            scopeStack.addLast(sl);
+            scopes.put(sl, currentScope = new LinkedHashMap<>());
             for (StatementNode stmt : sl.children) {
                 typecheck(stmt);
             }
+            scopeStack.removeLast();
+            currentScope = scopeStack.isEmpty() ? null : scopes.get(scopeStack.peekLast());
         } else if (root instanceof ExpressionStatement) {
             ExpressionStatement es = (ExpressionStatement)root;
             typecheck(es.expression);
@@ -53,12 +68,16 @@ public final class Typechecker {
             EvaluatedType[] declTypes = new EvaluatedType[vds.declarations.length];
             for (int i = 0; i < vds.declarations.length; i++) {
                 VariableDeclaration decl = vds.declarations[i];
+                if (currentScope.containsKey(decl.name)) {
+                    throw new IllegalArgumentException("Duplicate variable " + decl.name);
+                }
                 EvaluatedType exprType = evaluateExpression(decl.value);
                 if (decl.type == null) {
                     declTypes[i] = exprType;
                 } else {
-                    verifyTypeAssignable(declTypes[i] = evaluateIdentifier(decl.type), exprType);
+                    verifyTypeAssignable(declTypes[i] = evaluateTypeIdentifier(decl.type), exprType);
                 }
+                currentScope.put(decl.name, declTypes[i]);
             }
         } else {
             throw new IllegalArgumentException("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
@@ -70,7 +89,7 @@ public final class Typechecker {
         return types.get(node);
     }
 
-    private EvaluatedType evaluateIdentifier(String identifier) {
+    private EvaluatedType evaluateTypeIdentifier(String identifier) {
         for (ImportedName imported : imports) {
             if (imported.getClassName().equals(identifier)) {
                 return new EvaluatedType(cp, imported.getQualName());
@@ -101,6 +120,21 @@ public final class Typechecker {
             } catch (NotFoundException e) {
                 throw new IllegalArgumentException(e);
             }
+        } else if (expr instanceof IdentifierExpression) {
+            IdentifierExpression ie = (IdentifierExpression)expr;
+            EvaluatedType type = null;
+            Iterator<StatementList> scopeIterator = scopeStack.descendingIterator();
+            while (scopeIterator.hasNext()) {
+                Map<String, EvaluatedType> scope = scopes.get(scopeIterator.next());
+                type = scope.get(ie.identifier);
+                if (type != null) {
+                    break;
+                }
+            }
+            if (type == null) {
+                throw new IllegalArgumentException("Could not find variable " + ie.identifier);
+            }
+            types.put(expr, type);
         } else if (expr instanceof StringExpression) {
             types.put(expr, new EvaluatedType(cp, "java.lang.String"));
         } else {
