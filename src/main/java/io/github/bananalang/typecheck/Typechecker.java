@@ -4,6 +4,7 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.HashMap;
@@ -39,6 +40,7 @@ public final class Typechecker {
     private final ClassPool cp;
     private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
+    private final Map<ASTNode, CtMethod> methodCalls = new IdentityHashMap<>();
     private Map<String, EvaluatedType> currentScope = null;
 
     public Typechecker(ClassPool cp) {
@@ -56,6 +58,14 @@ public final class Typechecker {
 
     public EvaluatedType getType(ASTNode node) {
         return types.get(node);
+    }
+
+    public Map<StatementList, Map<String, EvaluatedType>> getScopes() {
+        return Collections.unmodifiableMap(scopes);
+    }
+
+    public CtMethod getMethodCall(ASTNode node) {
+        return methodCalls.get(node);
     }
 
     private EvaluatedType typecheck0(ASTNode root) {
@@ -147,6 +157,7 @@ public final class Typechecker {
             if (method == null) {
                 throw new IllegalArgumentException("Could not find method associated with " + ce);
             }
+            methodCalls.put(expr, method);
             try {
                 types.put(expr, new EvaluatedType(method.getReturnType()));
             } catch (NotFoundException e) {
