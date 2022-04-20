@@ -40,7 +40,7 @@ public final class Typechecker {
     private final ClassPool cp;
     private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
-    private final Map<ASTNode, CtMethod> methodCalls = new IdentityHashMap<>();
+    private final Map<CallExpression, CtMethod> methodCalls = new IdentityHashMap<>();
     private Map<String, EvaluatedType> currentScope = null;
 
     public Typechecker(ClassPool cp) {
@@ -64,7 +64,7 @@ public final class Typechecker {
         return Collections.unmodifiableMap(scopes);
     }
 
-    public CtMethod getMethodCall(ASTNode node) {
+    public CtMethod getMethodCall(CallExpression node) {
         return methodCalls.get(node);
     }
 
@@ -157,7 +157,7 @@ public final class Typechecker {
             if (method == null) {
                 throw new IllegalArgumentException("Could not find method associated with " + ce);
             }
-            methodCalls.put(expr, method);
+            methodCalls.put(ce, method);
             try {
                 types.put(expr, new EvaluatedType(method.getReturnType()));
             } catch (NotFoundException e) {
