@@ -5,6 +5,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -30,6 +32,8 @@ import javassist.CtMethod;
 import javassist.NotFoundException;
 
 public final class Typechecker {
+    private static final Map<Map.Entry<String, String>, Boolean> cachedAssignableLookups = new HashMap<>();
+
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final List<Imported<?>> imports = new ArrayList<>();
     private final ClassPool cp;
@@ -244,6 +248,11 @@ public final class Typechecker {
     }
 
     static boolean checkTypeAssignable(String assignTo, CtClass expr) {
-        return forEachSuperclass(expr, clazz -> clazz.getName().equals(assignTo));
+        if (assignTo.equals(expr.getName())) {
+            return true; // Fast path
+        }
+        return cachedAssignableLookups.computeIfAbsent(new SimpleImmutableEntry<>(assignTo, expr.getName()), k ->
+            forEachSuperclass(expr, clazz -> clazz.getName().equals(assignTo))
+        );
     }
 }
