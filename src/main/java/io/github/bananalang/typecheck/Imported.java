@@ -7,6 +7,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import banana.internal.annotation.BananaModule;
+import io.github.bananalang.util.BananaUtils;
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtField;
@@ -46,6 +48,15 @@ public class Imported<T> {
 
     public static Collection<Imported<?>> starImport(CtClass clazz) {
         List<Imported<?>> imports = new ArrayList<>();
+        try {
+            BananaModule moduleDesc = (BananaModule)clazz.getAnnotation(BananaModule.class);
+            if (moduleDesc != null) {
+                for (Class<?> exportedClass : moduleDesc.exportedClasses()) {
+                    imports.add(class_(clazz.getClassPool(), exportedClass.getName()));
+                }
+            }
+        } catch (ClassNotFoundException e) {
+        }
         for (CtField field : clazz.getDeclaredFields()) {
             if (Modifier.isPublic(field.getModifiers()) && Modifier.isStatic(field.getModifiers())) {
                 imports.add(new Imported<>(clazz, field, field.getName(), ImportType.STATIC_FIELD));
@@ -68,6 +79,14 @@ public class Imported<T> {
         } catch (NotFoundException e) {
             throw new IllegalArgumentException(e);
         }
+    }
+
+    public static Collection<Imported<?>> infer(String module, String name) {
+        module = module.replace('/', '.');
+        if (name.equals("*")) {
+            String moduleClassName = BananaUtils.moduleToClassName(module);
+        }
+        throw new IllegalArgumentException("Could not find import " + module + '.' + name);
     }
 
     public CtClass getOwnedClass() {
