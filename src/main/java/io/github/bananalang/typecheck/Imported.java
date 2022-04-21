@@ -3,6 +3,7 @@ package io.github.bananalang.typecheck;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -81,10 +82,54 @@ public class Imported<T> {
         }
     }
 
-    public static Collection<Imported<?>> infer(String module, String name) {
+    public static Collection<Imported<?>> infer(ClassPool cp, String module, String name) {
         module = module.replace('/', '.');
+        String moduleClassName = BananaUtils.moduleToClassName(module);
+        CtClass clazz = cp.getOrNull(moduleClassName);
         if (name.equals("*")) {
-            String moduleClassName = BananaUtils.moduleToClassName(module);
+            if (clazz != null) {
+                return starImport(clazz);
+            }
+            throw new IllegalArgumentException("Importing all members from a package not supported at this time.");
+        }
+        // 1. Check if it's an exported member of a module
+        if (clazz != null) {
+            try {
+                BananaModule moduleDesc = (BananaModule)clazz.getAnnotation(BananaModule.class);
+                if (moduleDesc != null) {
+                    for (Class<?> exportedClass : moduleDesc.exportedClasses()) {
+                        if (exportedClass.getSimpleName().equals(name)) {
+                            return Collections.singleton(class_(cp, exportedClass.getName()));
+                        }
+                    }
+                }
+            } catch (ClassNotFoundException e) {
+            }
+            try {
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredMethod(name), name, ImportType.STATIC_METHOD));
+            } catch (NotFoundException e) {
+            }
+            try {
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_METHOD));
+            } catch (NotFoundException e) {
+            }
+        }
+        // 2. Check if it's a class in a package
+        clazz = cp.getOrNull(module + '.' + name);
+        if (clazz != null) {
+            return Collections.singleton(class_(clazz));
+        }
+        // 3. Check if it's a public static member in a class
+        clazz = cp.getOrNull(module);
+        if (clazz != null) {
+            try {
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredMethod(name), name, ImportType.STATIC_METHOD));
+            } catch (NotFoundException e) {
+            }
+            try {
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_METHOD));
+            } catch (NotFoundException e) {
+            }
         }
         throw new IllegalArgumentException("Could not find import " + module + '.' + name);
     }

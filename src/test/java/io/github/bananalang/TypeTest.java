@@ -3,18 +3,18 @@ package io.github.bananalang;
 import java.io.IOException;
 
 import io.github.bananalang.parse.Parser;
-import io.github.bananalang.parse.ast.ASTNode;
+import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.typecheck.Typechecker;
 import javassist.ClassPool;
 import javassist.LoaderClassPath;
 
 public class TypeTest {
     public static void main(String[] args) throws IOException {
-        ASTNode root = new Parser(
-            "def var str = \"hello\".toUpperCase();" +
-            "def var var2 = \"wor\".concat(\"ld!\");" +
-            "def var other = str.toLowerCase();" +
-            "println(var2);"
+        StatementList root = new Parser(
+            "import java.lang.Class;" +
+            "import java.lang.Class.forName;" +
+            "def Class clazz = forName(\"ModuleTest\");" +
+            "println(clazz);"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());

@@ -21,6 +21,7 @@ import io.github.bananalang.parse.ast.CallExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
+import io.github.bananalang.parse.ast.ImportStatement;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
@@ -51,7 +52,7 @@ public final class Typechecker {
         this(ClassPool.getDefault());
     }
 
-    public EvaluatedType typecheck(ASTNode root) {
+    public EvaluatedType typecheck(StatementList root) {
         evaluateImports(root);
         return typecheck0(root);
     }
@@ -97,13 +98,13 @@ public final class Typechecker {
                 }
                 currentScope.put(decl.name, declTypes[i]);
             }
-        } else {
+        } else if (!(root instanceof ImportStatement)) {
             throw new IllegalArgumentException("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
         }
         return getType(root);
     }
 
-    private void evaluateImports(ASTNode root) {
+    private void evaluateImports(StatementList root) {
         imports.add(Imported.class_(cp, "java.lang.Class"));
         imports.add(Imported.class_(cp, "java.lang.Object"));
         imports.add(Imported.class_(cp, "java.lang.String"));
@@ -111,6 +112,13 @@ public final class Typechecker {
             imports.addAll(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
         } catch (IllegalArgumentException e) {
             // No stdlib installed
+        }
+        for (StatementNode stmt : root.children) {
+            if (!(stmt instanceof ImportStatement)) {
+                continue;
+            }
+            ImportStatement importStmt = (ImportStatement)stmt;
+            imports.addAll(Imported.infer(cp, importStmt.module, importStmt.name));
         }
     }
 
