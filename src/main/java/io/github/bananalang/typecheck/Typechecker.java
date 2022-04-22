@@ -34,6 +34,17 @@ import javassist.NotFoundException;
 
 public final class Typechecker {
     private static final Map<Map.Entry<String, String>, Boolean> cachedAssignableLookups = new HashMap<>();
+    private static final CtClass CT_JLO, CT_JLS;
+
+    static {
+        try {
+            ClassPool cp = ClassPool.getDefault();
+            CT_JLO = cp.get("java.lang.Object");
+            CT_JLS = cp.get("java.lang.String");
+        } catch (NotFoundException e) {
+            throw new Error(e);
+        }
+    }
 
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final List<Imported<?>> imports = new ArrayList<>();
@@ -90,6 +101,9 @@ public final class Typechecker {
                     throw new IllegalArgumentException("Duplicate variable " + decl.name);
                 }
                 EvaluatedType exprType = evaluateExpression(decl.value);
+                if (exprType.getName().equals("void")) {
+                    throw new IllegalArgumentException("Cannot create void variable");
+                }
                 if (decl.type == null) {
                     declTypes[i] = exprType;
                 } else {
@@ -137,14 +151,21 @@ public final class Typechecker {
             CallExpression ce = (CallExpression)expr;
             CtClass[] argTypes = new CtClass[ce.args.length];
             for (int i = 0; i < ce.args.length; i++) {
-                argTypes[i] = evaluateExpression(ce.args[i]).getJavassist();
+                EvaluatedType evaluated = evaluateExpression(ce.args[i]);
+                if (evaluated.getName().equals("void")) {
+                    throw new IllegalArgumentException("Cannot pass void as an argument to a function or method");
+                }
+                argTypes[i] = evaluated.getJavassist();
             }
             CtMethod method = null;
             if (ce.target instanceof AccessExpression) {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
+                if (targetType.getName().equals("void")) {
+                    throw new IllegalArgumentException("Cannot call method on void");
+                }
                 CtClass clazz = targetType.getJavassist();
-                method = findMethod(clazz, ae.name, false, argTypes);
+                method = findMethod(clazz, ae.name, true, false, argTypes);
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
                 for (Imported<?> imported : imports) {
@@ -153,7 +174,7 @@ public final class Typechecker {
                     Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
                     if (methodImport.getShortName().equals(ie.identifier)) {
                         try {
-                            method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), null, true, argTypes);
+                            method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), ie.identifier, false, true, argTypes);
                         } catch (NotFoundException e) {
                             throw new IllegalArgumentException(e);
                         }
@@ -186,18 +207,18 @@ public final class Typechecker {
             }
             types.put(expr, type);
         } else if (expr instanceof StringExpression) {
-            types.put(expr, new EvaluatedType(cp, "java.lang.String"));
+            types.put(expr, new EvaluatedType(CT_JLS));
         } else {
             throw new IllegalArgumentException("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
         }
         return getType(expr);
     }
 
-    private static CtMethod findMethod(CtMethod[] methods, String name, boolean staticOnly, CtClass... argTypes) {
+    private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
         try {
             methodCheckLoop:
             for (CtMethod maybe : methods) {
-                if (name != null && !maybe.getName().equals(name)) continue;
+                if (checkName && !maybe.getName().equals(name)) continue;
                 if (!isAccessible(maybe)) continue;
                 if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
                 CtClass[] methodParamTypes = maybe.getParameterTypes();
@@ -238,8 +259,8 @@ public final class Typechecker {
         throw new IllegalArgumentException(error.toString());
     }
 
-    private static CtMethod findMethod(CtClass clazz, String name, boolean staticOnly, CtClass... argTypes) {
-        return findMethod(clazz.getMethods(), name, staticOnly, argTypes);
+    private static CtMethod findMethod(CtClass clazz, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
+        return findMethod(clazz.getMethods(), name, checkName, staticOnly, argTypes);
     }
 
     private static boolean isAccessible(CtMethod method) {
@@ -254,15 +275,17 @@ public final class Typechecker {
             if (action.test(tryClass)) {
                 return true;
             }
-            if (!tryClass.isInterface()) {
-                try {
-                    CtClass superclass = tryClass.getSuperclass();
-                    if (superclass != null) {
-                        toSearch.add(superclass);
-                    }
-                } catch (NotFoundException e) {
-                    throw new IllegalArgumentException(e);
+            try {
+                CtClass superclass = tryClass.getSuperclass();
+                if (superclass == null) {
+                    // We've reached java.lang.Object or a primitve, so this is the end of the chain. Return early.
+                    return false;
                 }
+                if (!superclass.getName().equals("java.lang.Object")) {
+                    toSearch.add(superclass);
+                }
+            } catch (NotFoundException e) {
+                throw new IllegalArgumentException(e);
             }
             try {
                 for (CtClass intf : tryClass.getInterfaces()) {
@@ -272,7 +295,7 @@ public final class Typechecker {
                 throw new IllegalArgumentException(e);
             }
         }
-        return false;
+        return action.test(CT_JLO);
     }
 
     static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr) {

@@ -11,11 +11,7 @@ import javassist.LoaderClassPath;
 public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
-            "import java.lang.Class.forName;" +
-            "import java.lang.reflect.Method;" +
-            "" +
-            "def Method meth = forName(\"javassist.ClassPool\").getMethod(\"getDefault\");" +
-            "println(meth);"
+            "println(println(\"hello\"));"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());
