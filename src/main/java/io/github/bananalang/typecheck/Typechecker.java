@@ -98,11 +98,11 @@ public final class Typechecker {
             for (int i = 0; i < vds.declarations.length; i++) {
                 VariableDeclaration decl = vds.declarations[i];
                 if (currentScope.containsKey(decl.name)) {
-                    throw new IllegalArgumentException("Duplicate variable " + decl.name);
+                    throw new TypeCheckFailure("Duplicate variable " + decl.name);
                 }
                 EvaluatedType exprType = evaluateExpression(decl.value);
                 if (exprType.getName().equals("void")) {
-                    throw new IllegalArgumentException("Cannot create void variable");
+                    throw new TypeCheckFailure("Cannot create void variable");
                 }
                 if (decl.type == null) {
                     declTypes[i] = exprType;
@@ -112,18 +112,18 @@ public final class Typechecker {
                 currentScope.put(decl.name, declTypes[i]);
             }
         } else if (!(root instanceof ImportStatement)) {
-            throw new IllegalArgumentException("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
+            throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
         }
         return getType(root);
     }
 
     private void evaluateImports(StatementList root) {
         imports.add(Imported.class_(cp, "java.lang.Class"));
-        imports.add(Imported.class_(cp, "java.lang.Object"));
-        imports.add(Imported.class_(cp, "java.lang.String"));
+        imports.add(Imported.class_(CT_JLO));
+        imports.add(Imported.class_(CT_JLS));
         try {
             imports.addAll(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
-        } catch (IllegalArgumentException e) {
+        } catch (TypeCheckFailure e) {
             // No stdlib installed
         }
         for (StatementNode stmt : root.children) {
@@ -143,7 +143,7 @@ public final class Typechecker {
                 return new EvaluatedType(classImport.getObject());
             }
         }
-        throw new IllegalArgumentException("Could not find class " + identifier);
+        throw new TypeCheckFailure("Could not find class " + identifier);
     }
 
     private EvaluatedType evaluateExpression(ExpressionNode expr) {
@@ -153,7 +153,7 @@ public final class Typechecker {
             for (int i = 0; i < ce.args.length; i++) {
                 EvaluatedType evaluated = evaluateExpression(ce.args[i]);
                 if (evaluated.getName().equals("void")) {
-                    throw new IllegalArgumentException("Cannot pass void as an argument to a function or method");
+                    throw new TypeCheckFailure("Cannot pass void as an argument to a function or method");
                 }
                 argTypes[i] = evaluated.getJavassist();
             }
@@ -162,7 +162,7 @@ public final class Typechecker {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
                 if (targetType.getName().equals("void")) {
-                    throw new IllegalArgumentException("Cannot call method on void");
+                    throw new TypeCheckFailure("Cannot call method on void");
                 }
                 CtClass clazz = targetType.getJavassist();
                 method = findMethod(clazz, ae.name, true, false, argTypes);
@@ -176,20 +176,20 @@ public final class Typechecker {
                         try {
                             method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), ie.identifier, false, true, argTypes);
                         } catch (NotFoundException e) {
-                            throw new IllegalArgumentException(e);
+                            throw new TypeCheckFailure(e);
                         }
                         break;
                     }
                 }
             }
             if (method == null) {
-                throw new IllegalArgumentException("Could not find method associated with " + ce);
+                throw new TypeCheckFailure("Could not find method associated with " + ce);
             }
             methodCalls.put(ce, method);
             try {
                 types.put(expr, new EvaluatedType(method.getReturnType()));
             } catch (NotFoundException e) {
-                throw new IllegalArgumentException(e);
+                throw new TypeCheckFailure(e);
             }
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
@@ -203,13 +203,13 @@ public final class Typechecker {
                 }
             }
             if (type == null) {
-                throw new IllegalArgumentException("Could not find variable " + ie.identifier);
+                throw new TypeCheckFailure("Could not find variable " + ie.identifier);
             }
             types.put(expr, type);
         } else if (expr instanceof StringExpression) {
             types.put(expr, new EvaluatedType(CT_JLS));
         } else {
-            throw new IllegalArgumentException("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
+            throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
         }
         return getType(expr);
     }
@@ -246,7 +246,7 @@ public final class Typechecker {
                 return maybe;
             }
         } catch (NotFoundException e) {
-            throw new IllegalArgumentException(e);
+            throw new TypeCheckFailure(e);
         }
         StringBuilder error = new StringBuilder("Unable to find method ").append(name).append('(');
         for (int i = 0; i < argTypes.length; i++) {
@@ -256,7 +256,7 @@ public final class Typechecker {
             error.append(argTypes[i].getName());
         }
         error.append(')');
-        throw new IllegalArgumentException(error.toString());
+        throw new TypeCheckFailure(error.toString());
     }
 
     private static CtMethod findMethod(CtClass clazz, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
@@ -285,14 +285,14 @@ public final class Typechecker {
                     toSearch.add(superclass);
                 }
             } catch (NotFoundException e) {
-                throw new IllegalArgumentException(e);
+                throw new TypeCheckFailure(e);
             }
             try {
                 for (CtClass intf : tryClass.getInterfaces()) {
                     toSearch.add(intf);
                 }
             } catch (NotFoundException e) {
-                throw new IllegalArgumentException(e);
+                throw new TypeCheckFailure(e);
             }
         }
         return action.test(CT_JLO);
@@ -300,13 +300,13 @@ public final class Typechecker {
 
     static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr) {
         if (!expr.isAssignableTo(assignTo)) {
-            throw new IllegalArgumentException(expr + " not assignable to " + assignTo);
+            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
         }
     }
 
     static void verifyTypeAssignable(String assignTo, CtClass expr) {
         if (!checkTypeAssignable(assignTo, expr)) {
-            throw new IllegalArgumentException(expr + " not assignable to " + assignTo);
+            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
         }
     }
 
