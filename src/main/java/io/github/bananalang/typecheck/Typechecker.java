@@ -1,15 +1,14 @@
 package io.github.bananalang.typecheck;
 
+import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -28,6 +27,7 @@ import io.github.bananalang.parse.ast.VariableDeclarationStatement.VariableDecla
 import io.github.bananalang.typecheck.Imported.ImportType;
 import javassist.ClassPool;
 import javassist.CtClass;
+import javassist.CtField;
 import javassist.CtMethod;
 import javassist.Modifier;
 import javassist.NotFoundException;
@@ -47,7 +47,7 @@ public final class Typechecker {
     }
 
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
-    private final List<Imported<?>> imports = new ArrayList<>();
+    private final Map<String, Imported<?>> imports = new HashMap<>();
     private final ClassPool cp;
     private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
@@ -117,12 +117,22 @@ public final class Typechecker {
         return getType(root);
     }
 
+    private void addImport(Imported<?> imported) {
+        imports.put(imported.getShortName(), imported);
+    }
+
+    private void addImports(Collection<Imported<?>> imports) {
+        for (Imported<?> imported : imports) {
+            addImport(imported);
+        }
+    }
+
     private void evaluateImports(StatementList root) {
-        imports.add(Imported.class_(cp, "java.lang.Class"));
-        imports.add(Imported.class_(CT_JLO));
-        imports.add(Imported.class_(CT_JLS));
+        addImport(Imported.class_(cp, "java.lang.Class"));
+        addImport(Imported.class_(CT_JLO));
+        addImport(Imported.class_(CT_JLS));
         try {
-            imports.addAll(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
+            addImports(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
         } catch (TypeCheckFailure e) {
             // No stdlib installed
         }
@@ -131,17 +141,16 @@ public final class Typechecker {
                 continue;
             }
             ImportStatement importStmt = (ImportStatement)stmt;
-            imports.addAll(Imported.infer(cp, importStmt.module, importStmt.name));
+            addImports(Imported.infer(cp, importStmt.module, importStmt.name));
         }
     }
 
     private EvaluatedType evaluateTypeIdentifier(String identifier) {
-        for (Imported<?> imported : imports) {
-            if (imported.getType() == ImportType.CLASS && imported.getShortName().equals(identifier)) {
-                @SuppressWarnings("unchecked")
-                Imported<CtClass> classImport = (Imported<CtClass>)imported;
-                return new EvaluatedType(classImport.getObject());
-            }
+        Imported<?> imported = imports.get(identifier);
+        if (imported.getType() == ImportType.CLASS && imported.getShortName().equals(identifier)) {
+            @SuppressWarnings("unchecked")
+            Imported<CtClass> classImport = (Imported<CtClass>)imported;
+            return new EvaluatedType(classImport.getObject());
         }
         throw new TypeCheckFailure("Could not find class " + identifier);
     }
@@ -168,17 +177,14 @@ public final class Typechecker {
                 method = findMethod(clazz, ae.name, true, false, argTypes);
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
-                for (Imported<?> imported : imports) {
-                    if (imported.getType() != ImportType.STATIC_METHOD) continue;
+                Imported<?> imported = imports.get(ie.identifier);
+                if (imported.getType() == ImportType.STATIC_METHOD) {
                     @SuppressWarnings("unchecked")
                     Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
-                    if (methodImport.getShortName().equals(ie.identifier)) {
-                        try {
-                            method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), ie.identifier, false, true, argTypes);
-                        } catch (NotFoundException e) {
-                            throw new TypeCheckFailure(e);
-                        }
-                        break;
+                    try {
+                        method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), ie.identifier, false, true, argTypes);
+                    } catch (NotFoundException e) {
+                        throw new TypeCheckFailure(e);
                     }
                 }
             }
@@ -200,6 +206,18 @@ public final class Typechecker {
                 type = scope.get(ie.identifier);
                 if (type != null) {
                     break;
+                }
+            }
+            if (type == null) {
+                Imported<?> imported = imports.get(ie.identifier);
+                if (imported != null && imported.getType() == ImportType.STATIC_FIELD) {
+                    @SuppressWarnings("unchecked")
+                    CtField field = ((Imported<CtField>)imported).getObject();
+                    try {
+                        type = new EvaluatedType(field.getType());
+                    } catch (NotFoundException e) {
+                        throw new TypeCheckFailure(e);
+                    }
                 }
             }
             if (type == null) {

@@ -11,7 +11,8 @@ import javassist.LoaderClassPath;
 public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
-            "println(println(\"hello\"));"
+            "import java.lang.Integer.TYPE;" +
+            "println(TYPE);"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());

@@ -110,7 +110,7 @@ public class Imported<T> {
             } catch (NotFoundException e) {
             }
             try {
-                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_METHOD));
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_FIELD));
             } catch (NotFoundException e) {
             }
         }
@@ -127,7 +127,7 @@ public class Imported<T> {
             } catch (NotFoundException e) {
             }
             try {
-                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_METHOD));
+                return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredField(name), name, ImportType.STATIC_FIELD));
             } catch (NotFoundException e) {
             }
         }
