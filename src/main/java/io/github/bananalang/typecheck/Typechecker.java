@@ -62,9 +62,9 @@ public final class Typechecker {
         this(ClassPool.getDefault());
     }
 
-    public EvaluatedType typecheck(StatementList root) {
+    public void typecheck(StatementList root) {
         evaluateImports(root);
-        return typecheck0(root);
+        typecheck0(root);
     }
 
     public EvaluatedType getType(ASTNode node) {
@@ -79,7 +79,7 @@ public final class Typechecker {
         return methodCalls.get(node);
     }
 
-    private EvaluatedType typecheck0(ASTNode root) {
+    private void typecheck0(ASTNode root) {
         if (root instanceof StatementList) {
             StatementList sl = (StatementList)root;
             scopeStack.addLast(sl);
@@ -114,7 +114,6 @@ public final class Typechecker {
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
         }
-        return getType(root);
     }
 
     private void addImport(Imported<?> imported) {
