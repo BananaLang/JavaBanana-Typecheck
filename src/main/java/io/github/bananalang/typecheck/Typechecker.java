@@ -1,9 +1,7 @@
 package io.github.bananalang.typecheck;
 
-import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.AbstractMap.SimpleImmutableEntry;
@@ -31,6 +29,7 @@ import io.github.bananalang.typecheck.Imported.ImportType;
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtMethod;
+import javassist.Modifier;
 import javassist.NotFoundException;
 
 public final class Typechecker {
@@ -202,10 +201,25 @@ public final class Typechecker {
                 if (!isAccessible(maybe)) continue;
                 if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
                 CtClass[] methodParamTypes = maybe.getParameterTypes();
-                if (methodParamTypes.length != argTypes.length) continue;
-                for (int i = 0; i < methodParamTypes.length; i++) {
-                    if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
-                        continue methodCheckLoop;
+                if (Modifier.isVarArgs(maybe.getModifiers())) {
+                    if (argTypes.length < methodParamTypes.length - 1) continue;
+                    for (int i = 0; i < methodParamTypes.length - 1; i++) {
+                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
+                            continue methodCheckLoop;
+                        }
+                    }
+                    String varargType = methodParamTypes[methodParamTypes.length - 1].getComponentType().getName();
+                    for (int i = methodParamTypes.length - 1; i < argTypes.length; i++) {
+                        if (!checkTypeAssignable(varargType, argTypes[i])) {
+                            continue methodCheckLoop;
+                        }
+                    }
+                } else {
+                    if (methodParamTypes.length != argTypes.length) continue;
+                    for (int i = 0; i < methodParamTypes.length; i++) {
+                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
+                            continue methodCheckLoop;
+                        }
                     }
                 }
                 return maybe;
@@ -213,8 +227,15 @@ public final class Typechecker {
         } catch (NotFoundException e) {
             throw new IllegalArgumentException(e);
         }
-        String argStr = Arrays.toString(argTypes);
-        throw new IllegalArgumentException("Unable to find method " + name + "(" + argStr.substring(1, argStr.length() - 1) + ")");
+        StringBuilder error = new StringBuilder("Unable to find method ").append(name).append('(');
+        for (int i = 0; i < argTypes.length; i++) {
+            if (i > 0) {
+                error.append(", ");
+            }
+            error.append(argTypes[i].getName());
+        }
+        error.append(')');
+        throw new IllegalArgumentException(error.toString());
     }
 
     private static CtMethod findMethod(CtClass clazz, String name, boolean staticOnly, CtClass... argTypes) {
