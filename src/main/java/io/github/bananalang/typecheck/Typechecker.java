@@ -14,6 +14,7 @@ import java.util.function.Predicate;
 
 import io.github.bananalang.parse.ast.ASTNode;
 import io.github.bananalang.parse.ast.AccessExpression;
+import io.github.bananalang.parse.ast.AssignmentExpression;
 import io.github.bananalang.parse.ast.CallExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
@@ -49,10 +50,10 @@ public final class Typechecker {
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final Map<String, Imported<?>> imports = new HashMap<>();
     private final ClassPool cp;
-    private final Map<StatementList, Map<String, EvaluatedType>> scopes = new IdentityHashMap<>();
+    private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
     private final Map<CallExpression, CtMethod> methodCalls = new IdentityHashMap<>();
-    private Map<String, EvaluatedType> currentScope = null;
+    private Map<String, LocalVariable> currentScope = null;
 
     public Typechecker(ClassPool cp) {
         this.cp = cp;
@@ -71,7 +72,7 @@ public final class Typechecker {
         return types.get(node);
     }
 
-    public Map<StatementList, Map<String, EvaluatedType>> getScopes() {
+    public Map<StatementList, Map<String, LocalVariable>> getScopes() {
         return Collections.unmodifiableMap(scopes);
     }
 
@@ -100,16 +101,20 @@ public final class Typechecker {
                 if (currentScope.containsKey(decl.name)) {
                     throw new TypeCheckFailure("Duplicate variable " + decl.name);
                 }
-                EvaluatedType exprType = evaluateExpression(decl.value);
-                if (exprType.getName().equals("void")) {
-                    throw new TypeCheckFailure("Cannot create void variable");
-                }
-                if (decl.type == null) {
-                    declTypes[i] = exprType;
+                if (decl.value != null) {
+                    EvaluatedType exprType = evaluateExpression(decl.value);
+                    if (exprType.getName().equals("void")) {
+                        throw new TypeCheckFailure("Cannot create void variable");
+                    }
+                    if (decl.type == null) {
+                        declTypes[i] = exprType;
+                    } else {
+                        verifyTypeAssignable(declTypes[i] = evaluateTypeIdentifier(decl.type), exprType);
+                    }
                 } else {
-                    verifyTypeAssignable(declTypes[i] = evaluateTypeIdentifier(decl.type), exprType);
+                    declTypes[i] = evaluateTypeIdentifier(decl.type);
                 }
-                currentScope.put(decl.name, declTypes[i]);
+                currentScope.put(decl.name, new LocalVariable(decl.name, declTypes[i], currentScope.size(), decl.value != null));
             }
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
@@ -199,13 +204,12 @@ public final class Typechecker {
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
-            Iterator<StatementList> scopeIterator = scopeStack.descendingIterator();
-            while (scopeIterator.hasNext()) {
-                Map<String, EvaluatedType> scope = scopes.get(scopeIterator.next());
-                type = scope.get(ie.identifier);
-                if (type != null) {
-                    break;
+            LocalVariable variable = evaluateVariable(ie.identifier);
+            if (variable != null) {
+                if (!variable.isAssigned()) {
+                    throw new TypeCheckFailure("Variable " + variable + " accessed before it's assigned to");
                 }
+                type = variable.getType();
             }
             if (type == null) {
                 Imported<?> imported = imports.get(ie.identifier);
@@ -223,12 +227,44 @@ public final class Typechecker {
                 throw new TypeCheckFailure("Could not find variable " + ie.identifier);
             }
             types.put(expr, type);
+        } else if (expr instanceof AssignmentExpression) {
+            AssignmentExpression assignExpr = (AssignmentExpression)expr;
+            EvaluatedType valueType = evaluateExpression(assignExpr.value);
+            if (assignExpr.target instanceof IdentifierExpression) {
+                IdentifierExpression identifierExpr = (IdentifierExpression)assignExpr.target;
+                LocalVariable variable = evaluateVariable(identifierExpr.identifier);
+                if (variable == null) {
+                    throw new TypeCheckFailure("Variable " + variable + " is not defined");
+                }
+                if (!checkTypeAssignable(variable.getType().getName(), valueType.getJavassist())) {
+                    throw new TypeCheckFailure(
+                        "Cannot assign expression of type " + valueType.getName() +
+                        " to variable " + variable.getName() + " of type " + variable.getType().getName()
+                    );
+                }
+                variable.setAssigned(true);
+            } else {
+                throw new TypeCheckFailure("Non-direct assignments not supported yet");
+            }
+            types.put(expr, valueType);
         } else if (expr instanceof StringExpression) {
             types.put(expr, new EvaluatedType(CT_JLS));
         } else {
             throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
         }
         return getType(expr);
+    }
+
+    private LocalVariable evaluateVariable(String name) {
+        Iterator<StatementList> scopeIterator = scopeStack.descendingIterator();
+        while (scopeIterator.hasNext()) {
+            Map<String, LocalVariable> scope = scopes.get(scopeIterator.next());
+            LocalVariable variable = scope.get(name);
+            if (variable != null) {
+                return variable;
+            }
+        }
+        return null;
     }
 
     private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
