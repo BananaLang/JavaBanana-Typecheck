@@ -11,8 +11,10 @@ import javassist.LoaderClassPath;
 public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
-            "def Object a;" +
-            "println(a = \"hello\");"
+            "def var join(String a, String b) {" +
+                "return a.concat(\" \").concat(b);" +
+            "}" +
+            "println(join(\"hello\", \"world\"));"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());

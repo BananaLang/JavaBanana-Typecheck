@@ -2,6 +2,7 @@ package io.github.bananalang.typecheck;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
@@ -9,6 +10,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -18,8 +20,10 @@ import io.github.bananalang.parse.ast.AssignmentExpression;
 import io.github.bananalang.parse.ast.CallExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
+import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
 import io.github.bananalang.parse.ast.ImportStatement;
+import io.github.bananalang.parse.ast.ReturnStatement;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
@@ -30,6 +34,7 @@ import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtField;
 import javassist.CtMethod;
+import javassist.CtPrimitiveType;
 import javassist.Modifier;
 import javassist.NotFoundException;
 
@@ -52,7 +57,11 @@ public final class Typechecker {
     private final ClassPool cp;
     private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
-    private final Map<CallExpression, CtMethod> methodCalls = new IdentityHashMap<>();
+    private final Map<CallExpression, MethodCall> methodCalls = new IdentityHashMap<>();
+    private final Map<String, List<ScriptMethod>> methodDefinitions = new HashMap<>();
+    private EvaluatedType returnType = new EvaluatedType(CtPrimitiveType.voidType);
+    private final List<EvaluatedType> potentialReturns = new ArrayList<>();
+    private final List<LocalVariable> functionArgs = new ArrayList<>();
     private Map<String, LocalVariable> currentScope = null;
 
     public Typechecker(ClassPool cp) {
@@ -76,7 +85,7 @@ public final class Typechecker {
         return Collections.unmodifiableMap(scopes);
     }
 
-    public CtMethod getMethodCall(CallExpression node) {
+    public MethodCall getMethodCall(CallExpression node) {
         return methodCalls.get(node);
     }
 
@@ -85,6 +94,12 @@ public final class Typechecker {
             StatementList sl = (StatementList)root;
             scopeStack.addLast(sl);
             scopes.put(sl, currentScope = new LinkedHashMap<>());
+            if (!functionArgs.isEmpty()) {
+                for (LocalVariable arg : functionArgs) {
+                    currentScope.put(arg.getName(), arg);
+                }
+                functionArgs.clear();
+            }
             for (StatementNode stmt : sl.children) {
                 typecheck0(stmt);
             }
@@ -115,6 +130,62 @@ public final class Typechecker {
                     declTypes[i] = evaluateTypeIdentifier(decl.type);
                 }
                 currentScope.put(decl.name, new LocalVariable(decl.name, declTypes[i], currentScope.size(), decl.value != null));
+            }
+        } else if (root instanceof FunctionDefinitionStatement) {
+            FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)root;
+            returnType = functionDef.returnType == null ? null : new EvaluatedType(cp, functionDef.returnType);
+            List<EvaluatedType> argTypes = new ArrayList<>(functionDef.args.length);
+            for (VariableDeclaration arg : functionDef.args) {
+                EvaluatedType type;
+                if (arg.type == null) {
+                    type = evaluateExpression(arg.value);
+                } else {
+                    Imported<?> imported = imports.get(arg.type);
+                    if (imported == null || imported.getType() != ImportType.CLASS) {
+                        throw new TypeCheckFailure("Could not find class " + arg.type);
+                    }
+                    @SuppressWarnings("unchecked")
+                    Imported<CtClass> classImport = (Imported<CtClass>)imported;
+                    type = new EvaluatedType(classImport.getObject());
+                }
+                if (arg.type != null && arg.value != null) {
+                    verifyTypeAssignable(type, evaluateExpression(arg.value));
+                }
+                functionArgs.add(new LocalVariable(arg.name, type, functionArgs.size(), true));
+                argTypes.add(type);
+            }
+            typecheck0(functionDef.body);
+            if (returnType == null) {
+                if (potentialReturns.isEmpty()) {
+                    returnType = new EvaluatedType(CtPrimitiveType.voidType);
+                } else {
+                    for (EvaluatedType maybeReturnType : potentialReturns) {
+                        if (returnType == null) {
+                            returnType = maybeReturnType;
+                            continue;
+                        }
+                        if (maybeReturnType.isAssignableTo(returnType)) {
+                            continue;
+                        }
+                        if (!returnType.isAssignableTo(maybeReturnType)) {
+                            throw new TypeCheckFailure("Incompatible return types: " + returnType.getName() + " and " + maybeReturnType.getName());
+                        }
+                        returnType = maybeReturnType;
+                    }
+                    potentialReturns.clear();
+                }
+            }
+            methodDefinitions.computeIfAbsent(functionDef.name, k -> new ArrayList<>())
+                .add(new ScriptMethod(functionDef.name, returnType, argTypes.toArray(new EvaluatedType[functionDef.args.length])));
+        } else if (root instanceof ReturnStatement) {
+            ReturnStatement returnStmt = (ReturnStatement)root;
+            EvaluatedType checkType = returnStmt.value != null
+                ? evaluateExpression(returnStmt.value)
+                : new EvaluatedType(CtPrimitiveType.voidType);
+            if (returnType == null) {
+                potentialReturns.add(checkType);
+            } else {
+                verifyTypeAssignable(returnType, checkType);
             }
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
@@ -170,7 +241,7 @@ public final class Typechecker {
                 }
                 argTypes[i] = evaluated.getJavassist();
             }
-            CtMethod method = null;
+            MethodCall method = null;
             if (ce.target instanceof AccessExpression) {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
@@ -178,17 +249,40 @@ public final class Typechecker {
                     throw new TypeCheckFailure("Cannot call method on void");
                 }
                 CtClass clazz = targetType.getJavassist();
-                method = findMethod(clazz, ae.name, true, false, argTypes);
+                method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
-                Imported<?> imported = imports.get(ie.identifier);
-                if (imported.getType() == ImportType.STATIC_METHOD) {
-                    @SuppressWarnings("unchecked")
-                    Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
-                    try {
-                        method = findMethod(methodImport.getOwnedClass().getDeclaredMethods(ie.identifier), ie.identifier, false, true, argTypes);
-                    } catch (NotFoundException e) {
-                        throw new TypeCheckFailure(e);
+                List<ScriptMethod> checkMethods = methodDefinitions.get(ie.identifier);
+                if (checkMethods != null) {
+                    searchDefinitionsLoop:
+                    for (ScriptMethod checkMethod : checkMethods) {
+                        EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
+                        if (checkArgTypes.length != argTypes.length) continue;
+                        for (int i = 0; i < checkArgTypes.length; i++) {
+                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i])) {
+                                continue searchDefinitionsLoop;
+                            }
+                        }
+                        method = new MethodCall(checkMethod);
+                        break;
+                    }
+                }
+                if (method == null) {
+                    Imported<?> imported = imports.get(ie.identifier);
+                    if (imported != null && imported.getType() == ImportType.STATIC_METHOD) {
+                        @SuppressWarnings("unchecked")
+                        Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
+                        try {
+                            method = new MethodCall(findMethod(
+                                methodImport.getOwnedClass().getDeclaredMethods(ie.identifier),
+                                ie.identifier,
+                                false,
+                                true,
+                                argTypes
+                            ));
+                        } catch (NotFoundException e) {
+                            throw new TypeCheckFailure(e);
+                        }
                     }
                 }
             }
@@ -196,11 +290,7 @@ public final class Typechecker {
                 throw new TypeCheckFailure("Could not find method associated with " + ce);
             }
             methodCalls.put(ce, method);
-            try {
-                types.put(expr, new EvaluatedType(method.getReturnType()));
-            } catch (NotFoundException e) {
-                throw new TypeCheckFailure(e);
-            }
+            types.put(expr, method.getReturnType());
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
