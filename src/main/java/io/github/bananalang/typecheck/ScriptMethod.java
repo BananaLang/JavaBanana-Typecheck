@@ -2,7 +2,7 @@ package io.github.bananalang.typecheck;
 
 public final class ScriptMethod {
     private final String name;
-    private final EvaluatedType returnType;
+    private EvaluatedType returnType;
     private final EvaluatedType[] argTypes;
 
     public ScriptMethod(String name, EvaluatedType returnType, EvaluatedType[] argTypes) {
@@ -17,6 +17,10 @@ public final class ScriptMethod {
 
     public EvaluatedType getReturnType() {
         return returnType;
+    }
+
+    void setReturnType(EvaluatedType returnType) {
+        this.returnType = returnType;
     }
 
     public EvaluatedType[] getArgTypes() {

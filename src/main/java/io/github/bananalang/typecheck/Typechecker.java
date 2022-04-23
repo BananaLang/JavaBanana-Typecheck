@@ -12,6 +12,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import io.github.bananalang.parse.ast.ASTNode;
@@ -75,6 +76,7 @@ public final class Typechecker {
 
     public void typecheck(StatementList root) {
         evaluateImports(root);
+        evaluateMethodHeaders(root);
         typecheck0(root);
     }
 
@@ -138,26 +140,10 @@ public final class Typechecker {
             }
         } else if (root instanceof FunctionDefinitionStatement) {
             FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)root;
-            returnType = functionDef.returnType == null ? null : new EvaluatedType(cp, functionDef.returnType);
-            List<EvaluatedType> argTypes = new ArrayList<>(functionDef.args.length);
-            for (VariableDeclaration arg : functionDef.args) {
-                EvaluatedType type;
-                if (arg.type == null) {
-                    type = evaluateExpression(arg.value);
-                } else {
-                    Imported<?> imported = imports.get(arg.type);
-                    if (imported == null || imported.getType() != ImportType.CLASS) {
-                        throw new TypeCheckFailure("Could not find class " + arg.type);
-                    }
-                    @SuppressWarnings("unchecked")
-                    Imported<CtClass> classImport = (Imported<CtClass>)imported;
-                    type = new EvaluatedType(classImport.getObject());
-                }
-                if (arg.type != null && arg.value != null) {
-                    verifyTypeAssignable(type, evaluateExpression(arg.value));
-                }
-                functionArgs.add(new LocalVariable(arg.name, type, functionArgs.size(), true));
-                argTypes.add(type);
+            ScriptMethod method = methodDefinitions.get(functionDef);
+            returnType = method.getReturnType();
+            for (int i = 0; i < functionDef.args.length; i++) {
+                functionArgs.add(new LocalVariable(functionDef.args[i].name, method.getArgTypes()[i], functionArgs.size(), true));
             }
             typecheck0(functionDef.body);
             if (returnType == null) {
@@ -179,14 +165,8 @@ public final class Typechecker {
                     }
                     potentialReturns.clear();
                 }
+                method.setReturnType(returnType);
             }
-            ScriptMethod methodDef = new ScriptMethod(
-                functionDef.name,
-                returnType,
-                argTypes.toArray(new EvaluatedType[functionDef.args.length])
-            );
-            definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>()).add(methodDef);
-            methodDefinitions.put(functionDef, methodDef);
         } else if (root instanceof ReturnStatement) {
             ReturnStatement returnStmt = (ReturnStatement)root;
             EvaluatedType checkType = returnStmt.value != null
@@ -199,6 +179,28 @@ public final class Typechecker {
             }
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
+        }
+    }
+
+    private void evaluateMethodHeaders(StatementList root) {
+        for (StatementNode stmt : root.children) {
+            if (!(stmt instanceof FunctionDefinitionStatement)) continue;
+            FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)stmt;
+            EvaluatedType[] argTypes = new EvaluatedType[functionDef.args.length];
+            for (int i = 0; i < argTypes.length; i++) {
+                VariableDeclaration arg = functionDef.args[i];
+                if (arg.type == null) {
+                    argTypes[i] = evaluateExpression(arg.value);
+                } else {
+                    argTypes[i] = evaluateTypeIdentifier(arg.type);
+                    if (arg.value != null) {
+                        verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value));
+                    }
+                }
+            }
+            ScriptMethod method = new ScriptMethod(functionDef.name, ifNotNull(functionDef.returnType, this::evaluateTypeIdentifier), argTypes);
+            methodDefinitions.put(functionDef, method);
+            definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>(1)).add(method);
         }
     }
 
@@ -232,7 +234,7 @@ public final class Typechecker {
 
     private EvaluatedType evaluateTypeIdentifier(String identifier) {
         Imported<?> imported = imports.get(identifier);
-        if (imported.getType() == ImportType.CLASS && imported.getShortName().equals(identifier)) {
+        if (imported != null && imported.getType() == ImportType.CLASS) {
             @SuppressWarnings("unchecked")
             Imported<CtClass> classImport = (Imported<CtClass>)imported;
             return new EvaluatedType(classImport.getObject());
@@ -300,7 +302,13 @@ public final class Typechecker {
                 throw new TypeCheckFailure("Could not find method associated with " + ce);
             }
             methodCalls.put(ce, method);
-            types.put(expr, method.getReturnType());
+            EvaluatedType returnType = method.getReturnType();
+            if (returnType == null) {
+                throw new TypeCheckFailure(
+                    "Forward reference (or self-reference) to a function with an inferred return type"
+                );
+            }
+            types.put(expr, returnType);
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
@@ -470,5 +478,9 @@ public final class Typechecker {
         return cachedAssignableLookups.computeIfAbsent(new SimpleImmutableEntry<>(assignTo, expr.getName()), k ->
             forEachSuperclass(expr, clazz -> clazz.getName().equals(assignTo))
         );
+    }
+
+    private static <T, R> R ifNotNull(T value, Function<T, R> ifNotNull) {
+        return value == null ? null : ifNotNull.apply(value);
     }
 }

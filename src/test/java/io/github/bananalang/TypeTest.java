@@ -12,7 +12,10 @@ public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
             "def var join(String a, String b) {" +
-                "return a.concat(\" \").concat(b);" +
+                "return concat(a, \" \", b);" +
+            "}" +
+            "def String concat(String a, String b, String c) {" +
+                "return a.concat(b).concat(c);" +
             "}" +
             "println(join(\"hello\", \"world\"));"
         ).parse();
