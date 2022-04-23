@@ -32,6 +32,10 @@ public final class MethodCall {
         return scriptMethod != null;
     }
 
+    public String getName() {
+        return isScriptMethod() ? scriptMethod.getName() : javaMethod.getName();
+    }
+
     public EvaluatedType getReturnType() {
         if (returnType != null) {
             return returnType;
