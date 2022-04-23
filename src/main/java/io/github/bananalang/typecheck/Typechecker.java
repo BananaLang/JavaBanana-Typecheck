@@ -58,7 +58,8 @@ public final class Typechecker {
     private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
     private final Map<CallExpression, MethodCall> methodCalls = new IdentityHashMap<>();
-    private final Map<String, List<ScriptMethod>> methodDefinitions = new HashMap<>();
+    private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
+    private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
     private EvaluatedType returnType = new EvaluatedType(CtPrimitiveType.voidType);
     private final List<EvaluatedType> potentialReturns = new ArrayList<>();
     private final List<LocalVariable> functionArgs = new ArrayList<>();
@@ -87,6 +88,10 @@ public final class Typechecker {
 
     public MethodCall getMethodCall(CallExpression node) {
         return methodCalls.get(node);
+    }
+
+    public ScriptMethod getMethodDefinition(FunctionDefinitionStatement node) {
+        return methodDefinitions.get(node);
     }
 
     private void typecheck0(ASTNode root) {
@@ -175,8 +180,13 @@ public final class Typechecker {
                     potentialReturns.clear();
                 }
             }
-            methodDefinitions.computeIfAbsent(functionDef.name, k -> new ArrayList<>())
-                .add(new ScriptMethod(functionDef.name, returnType, argTypes.toArray(new EvaluatedType[functionDef.args.length])));
+            ScriptMethod methodDef = new ScriptMethod(
+                functionDef.name,
+                returnType,
+                argTypes.toArray(new EvaluatedType[functionDef.args.length])
+            );
+            definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>()).add(methodDef);
+            methodDefinitions.put(functionDef, methodDef);
         } else if (root instanceof ReturnStatement) {
             ReturnStatement returnStmt = (ReturnStatement)root;
             EvaluatedType checkType = returnStmt.value != null
@@ -252,7 +262,7 @@ public final class Typechecker {
                 method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
-                List<ScriptMethod> checkMethods = methodDefinitions.get(ie.identifier);
+                List<ScriptMethod> checkMethods = definedMethods.get(ie.identifier);
                 if (checkMethods != null) {
                     searchDefinitionsLoop:
                     for (ScriptMethod checkMethod : checkMethods) {
