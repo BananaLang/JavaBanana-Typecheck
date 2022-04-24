@@ -42,6 +42,7 @@ import javassist.NotFoundException;
 public final class Typechecker {
     private static final Map<Map.Entry<String, String>, Boolean> cachedAssignableLookups = new HashMap<>();
     private static final CtClass CT_JLO, CT_JLS;
+    private static final EvaluatedType ET_JLS, ET_VOID;
 
     static {
         try {
@@ -51,6 +52,8 @@ public final class Typechecker {
         } catch (NotFoundException e) {
             throw new Error(e);
         }
+        ET_JLS = new EvaluatedType(CT_JLS);
+        ET_VOID = new EvaluatedType(CtPrimitiveType.voidType);
     }
 
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
@@ -61,7 +64,7 @@ public final class Typechecker {
     private final Map<CallExpression, MethodCall> methodCalls = new IdentityHashMap<>();
     private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
     private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
-    private EvaluatedType returnType = new EvaluatedType(CtPrimitiveType.voidType);
+    private EvaluatedType returnType = ET_VOID;
     private final List<EvaluatedType> potentialReturns = new ArrayList<>();
     private final List<LocalVariable> functionArgs = new ArrayList<>();
     private Map<String, LocalVariable> currentScope = null;
@@ -148,7 +151,7 @@ public final class Typechecker {
             typecheck0(functionDef.body);
             if (returnType == null) {
                 if (potentialReturns.isEmpty()) {
-                    returnType = new EvaluatedType(CtPrimitiveType.voidType);
+                    returnType = ET_VOID;
                 } else {
                     for (EvaluatedType maybeReturnType : potentialReturns) {
                         if (returnType == null) {
@@ -167,11 +170,12 @@ public final class Typechecker {
                 }
                 method.setReturnType(returnType);
             }
+            returnType = ET_VOID;
         } else if (root instanceof ReturnStatement) {
             ReturnStatement returnStmt = (ReturnStatement)root;
             EvaluatedType checkType = returnStmt.value != null
                 ? evaluateExpression(returnStmt.value)
-                : new EvaluatedType(CtPrimitiveType.voidType);
+                : ET_VOID;
             if (returnType == null) {
                 potentialReturns.add(checkType);
             } else {
@@ -356,7 +360,7 @@ public final class Typechecker {
             }
             types.put(expr, valueType);
         } else if (expr instanceof StringExpression) {
-            types.put(expr, new EvaluatedType(CT_JLS));
+            types.put(expr, ET_JLS);
         } else {
             throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
         }
@@ -461,13 +465,13 @@ public final class Typechecker {
 
     static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr) {
         if (!expr.isAssignableTo(assignTo)) {
-            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
+            throw new TypeCheckFailure(expr.getName() + " not assignable to " + assignTo.getName());
         }
     }
 
     static void verifyTypeAssignable(String assignTo, CtClass expr) {
         if (!checkTypeAssignable(assignTo, expr)) {
-            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
+            throw new TypeCheckFailure(expr.getName() + " not assignable to " + assignTo);
         }
     }
 

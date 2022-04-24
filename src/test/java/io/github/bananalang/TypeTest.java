@@ -17,6 +17,7 @@ public class TypeTest {
             "def String concat(String a, String b, String c) {" +
                 "return a.concat(b).concat(c);" +
             "}" +
+            "return;" +
             "println(join(\"hello\", \"world\"));"
         ).parse();
 
