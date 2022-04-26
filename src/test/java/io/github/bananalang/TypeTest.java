@@ -15,7 +15,7 @@ public class TypeTest {
                 "return concat(a ?? \"null\", \" \", b ?? \"null\");" +
             "}" +
             "def String concat(String a, String b, String c) {" +
-                "return a.concat(b).concat(c);" +
+                "return a.concat(b)?.concat(c) ?? \"\";" +
             "}" +
             "println(join(\"hello\", \"world\"));"
         ).parse();

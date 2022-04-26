@@ -87,6 +87,9 @@ public final class EvaluatedType {
         if (equals(type)) {
             return true;
         }
+        if (this == NULL) {
+            return type.nullable;
+        }
         if (nullable && !type.nullable) {
             return false;
         }

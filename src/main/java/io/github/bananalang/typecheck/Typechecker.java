@@ -264,14 +264,23 @@ public final class Typechecker {
                 argTypes[i] = evaluated;
             }
             MethodCall method = null;
+            EvaluatedType methodReturnType = null;
             if (ce.target instanceof AccessExpression) {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
+                if (ae.safeNavigation && !targetType.isNullable()) {
+                    // TODO: make this a warning somehow
+                    throw new TypeCheckFailure("Left-hand side of ?. must be nullable");
+                }
+                if (!ae.safeNavigation && targetType.isNullable()) {
+                    throw new TypeCheckFailure("Left-hand side of . cannot be nullable. Did you mean to use ?. ?");
+                }
                 if (targetType.getName().equals("void")) {
                     throw new TypeCheckFailure("Cannot call method on void");
                 }
                 CtClass clazz = targetType.getJavassist();
                 method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
+                methodReturnType = method.getReturnType().nullable(method.getReturnType().isNullable() || ae.safeNavigation);
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
                 List<ScriptMethod> checkMethods = definedMethods.get(ie.identifier);
@@ -310,6 +319,9 @@ public final class Typechecker {
                         }
                     }
                 }
+                if (method != null) {
+                    methodReturnType = method.getReturnType();
+                }
             }
             if (method == null) {
                 StringBuilder error = new StringBuilder("Could not find method compatible with ");
@@ -334,13 +346,12 @@ public final class Typechecker {
                 throw new TypeCheckFailure(error.append(')').toString());
             }
             methodCalls.put(ce, method);
-            EvaluatedType returnType = method.getReturnType();
-            if (returnType == null) {
+            if (methodReturnType == null) {
                 throw new TypeCheckFailure(
                     "Forward reference (or self-reference) to a function with an inferred return type"
                 );
             }
-            types.put(expr, returnType);
+            types.put(expr, methodReturnType);
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
@@ -394,6 +405,7 @@ public final class Typechecker {
             switch (binExpr.type) {
                 case NULL_COALESCE: {
                     if (!leftType.isNullable()) {
+                        // TODO: make this a warning somehow
                         throw new TypeCheckFailure("Left-hand-side of ?? must be nullable");
                     }
                     if (rightType == EvaluatedType.NULL) {
