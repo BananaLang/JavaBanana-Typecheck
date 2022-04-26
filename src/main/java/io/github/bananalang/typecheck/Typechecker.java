@@ -18,12 +18,14 @@ import java.util.function.Predicate;
 import io.github.bananalang.parse.ast.ASTNode;
 import io.github.bananalang.parse.ast.AccessExpression;
 import io.github.bananalang.parse.ast.AssignmentExpression;
+import io.github.bananalang.parse.ast.BinaryExpression;
 import io.github.bananalang.parse.ast.CallExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
 import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
 import io.github.bananalang.parse.ast.ImportStatement;
+import io.github.bananalang.parse.ast.NullExpression;
 import io.github.bananalang.parse.ast.ReturnStatement;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
@@ -155,15 +157,18 @@ public final class Typechecker {
                     returnType = ET_VOID;
                 } else {
                     for (EvaluatedType maybeReturnType : potentialReturns) {
-                        if (returnType == null) {
+                        if (returnType == null || returnType == EvaluatedType.NULL) {
                             returnType = maybeReturnType;
+                            continue;
+                        }
+                        if (maybeReturnType == EvaluatedType.NULL) {
                             continue;
                         }
                         if (maybeReturnType.isAssignableTo(returnType)) {
                             continue;
                         }
                         if (!returnType.isAssignableTo(maybeReturnType)) {
-                            throw new TypeCheckFailure("Incompatible return types: " + returnType.getName() + " and " + maybeReturnType.getName());
+                            throw new TypeCheckFailure("Incompatible return types: " + returnType + " and " + maybeReturnType);
                         }
                         returnType = maybeReturnType;
                     }
@@ -371,10 +376,10 @@ public final class Typechecker {
                 if (variable == null) {
                     throw new TypeCheckFailure("Variable " + variable + " is not defined");
                 }
-                if (!checkTypeAssignable(variable.getType().getName(), valueType.getJavassist())) {
+                if (!variable.getType().isAssignableTo(valueType)) {
                     throw new TypeCheckFailure(
-                        "Cannot assign expression of type " + valueType.getName() +
-                        " to variable " + variable.getName() + " of type " + variable.getType().getName()
+                        "Cannot assign expression of type " + valueType +
+                        " to variable " + variable + " of type " + variable.getType()
                     );
                 }
                 variable.setAssigned(true);
@@ -382,6 +387,14 @@ public final class Typechecker {
                 throw new TypeCheckFailure("Non-direct assignments not supported yet");
             }
             types.put(expr, valueType);
+        } else if (expr instanceof BinaryExpression) {
+            BinaryExpression binExpr = (BinaryExpression)expr;
+            switch (binExpr.type) {
+                default:
+                    throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet");
+            }
+        } else if (expr instanceof NullExpression) {
+            types.put(expr, EvaluatedType.NULL);
         } else if (expr instanceof StringExpression) {
             types.put(expr, ET_JLS);
         } else {
@@ -499,7 +512,7 @@ public final class Typechecker {
 
     static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr) {
         if (!expr.isAssignableTo(assignTo)) {
-            throw new TypeCheckFailure(expr.getName() + " not assignable to " + assignTo.getName());
+            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
         }
     }
 

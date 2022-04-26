@@ -5,6 +5,8 @@ import javassist.CtClass;
 import javassist.NotFoundException;
 
 public final class EvaluatedType {
+    public static final EvaluatedType NULL = new EvaluatedType(null, "null", true);
+
     private final ClassPool cp;
     private final String name;
     private final boolean nullable;
@@ -51,6 +53,9 @@ public final class EvaluatedType {
     }
 
     private CtClass evaluate() {
+        if (cp == null) {
+            return null;
+        }
         try {
             return cp.get(name);
         } catch (NotFoundException e) {
