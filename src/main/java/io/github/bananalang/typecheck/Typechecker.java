@@ -29,6 +29,7 @@ import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement;
+import io.github.bananalang.parse.ast.VariableDeclarationStatement.TypeReference;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.VariableDeclaration;
 import io.github.bananalang.typecheck.Imported.ImportType;
 import javassist.ClassPool;
@@ -52,8 +53,8 @@ public final class Typechecker {
         } catch (NotFoundException e) {
             throw new Error(e);
         }
-        ET_JLS = new EvaluatedType(CT_JLS);
-        ET_VOID = new EvaluatedType(CtPrimitiveType.voidType);
+        ET_JLS = new EvaluatedType(CT_JLS, false);
+        ET_VOID = new EvaluatedType(CtPrimitiveType.voidType, false);
     }
 
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
@@ -134,10 +135,10 @@ public final class Typechecker {
                     if (decl.type == null) {
                         declTypes[i] = exprType;
                     } else {
-                        verifyTypeAssignable(declTypes[i] = evaluateTypeIdentifier(decl.type), exprType);
+                        verifyTypeAssignable(declTypes[i] = evaluateType(decl.type), exprType);
                     }
                 } else {
-                    declTypes[i] = evaluateTypeIdentifier(decl.type);
+                    declTypes[i] = evaluateType(decl.type);
                 }
                 currentScope.put(decl.name, new LocalVariable(decl.name, declTypes[i], currentScope.size(), decl.value != null));
             }
@@ -196,13 +197,13 @@ public final class Typechecker {
                 if (arg.type == null) {
                     argTypes[i] = evaluateExpression(arg.value);
                 } else {
-                    argTypes[i] = evaluateTypeIdentifier(arg.type);
+                    argTypes[i] = evaluateType(arg.type);
                     if (arg.value != null) {
                         verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value));
                     }
                 }
             }
-            ScriptMethod method = new ScriptMethod(functionDef.name, ifNotNull(functionDef.returnType, this::evaluateTypeIdentifier), argTypes);
+            ScriptMethod method = new ScriptMethod(functionDef.name, ifNotNull(functionDef.returnType, this::evaluateType), argTypes);
             methodDefinitions.put(functionDef, method);
             definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>(1)).add(method);
         }
@@ -236,26 +237,26 @@ public final class Typechecker {
         }
     }
 
-    private EvaluatedType evaluateTypeIdentifier(String identifier) {
-        Imported<?> imported = imports.get(identifier);
+    private EvaluatedType evaluateType(TypeReference type) {
+        Imported<?> imported = imports.get(type.name);
         if (imported != null && imported.getType() == ImportType.CLASS) {
             @SuppressWarnings("unchecked")
             Imported<CtClass> classImport = (Imported<CtClass>)imported;
-            return new EvaluatedType(classImport.getObject());
+            return new EvaluatedType(classImport.getObject(), type.nullable);
         }
-        throw new TypeCheckFailure("Could not find class " + identifier);
+        throw new TypeCheckFailure("Could not find class " + type.name);
     }
 
     private EvaluatedType evaluateExpression(ExpressionNode expr) {
         if (expr instanceof CallExpression) {
             CallExpression ce = (CallExpression)expr;
-            CtClass[] argTypes = new CtClass[ce.args.length];
+            EvaluatedType[] argTypes = new EvaluatedType[ce.args.length];
             for (int i = 0; i < ce.args.length; i++) {
                 EvaluatedType evaluated = evaluateExpression(ce.args[i]);
                 if (evaluated.getName().equals("void")) {
                     throw new TypeCheckFailure("Cannot pass void as an argument to a function or method");
                 }
-                argTypes[i] = evaluated.getJavassist();
+                argTypes[i] = evaluated;
             }
             MethodCall method = null;
             if (ce.target instanceof AccessExpression) {
@@ -275,7 +276,10 @@ public final class Typechecker {
                         EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
                         if (checkArgTypes.length != argTypes.length) continue;
                         for (int i = 0; i < checkArgTypes.length; i++) {
-                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i])) {
+                            if (argTypes[i].isNullable() && !checkArgTypes[i].isNullable()) {
+                                continue searchDefinitionsLoop;
+                            }
+                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i].getJavassist())) {
                                 continue searchDefinitionsLoop;
                             }
                         }
@@ -303,7 +307,26 @@ public final class Typechecker {
                 }
             }
             if (method == null) {
-                throw new TypeCheckFailure("Could not find method associated with " + ce);
+                StringBuilder error = new StringBuilder("Could not find method compatible with ");
+                if (ce.target instanceof AccessExpression) {
+                    AccessExpression ae = (AccessExpression)ce.target;
+                    try {
+                        error.append(evaluateExpression(ae.target));
+                    } catch (TypeCheckFailure e) {
+                        error.append("UNKNOWN");
+                    }
+                    error.append('.').append(ae.name);
+                } else if (ce.target instanceof IdentifierExpression) {
+                    error.append(((IdentifierExpression)ce.target).identifier);
+                }
+                error.append('(');
+                for (int i = 0; i < argTypes.length; i++) {
+                    if (i > 0) {
+                        error.append(", ");
+                    }
+                    error.append(argTypes[i]);
+                }
+                throw new TypeCheckFailure(error.append(')').toString());
             }
             methodCalls.put(ce, method);
             EvaluatedType returnType = method.getReturnType();
@@ -319,7 +342,7 @@ public final class Typechecker {
             LocalVariable variable = evaluateVariable(ie.identifier);
             if (variable != null) {
                 if (!variable.isAssigned()) {
-                    throw new TypeCheckFailure("Variable " + variable + " accessed before it's assigned to");
+                    throw new TypeCheckFailure("Variable " + variable.getName() + " accessed before it's assigned to");
                 }
                 type = variable.getType();
             }
@@ -329,7 +352,7 @@ public final class Typechecker {
                     @SuppressWarnings("unchecked")
                     CtField field = ((Imported<CtField>)imported).getObject();
                     try {
-                        type = new EvaluatedType(field.getType());
+                        type = new EvaluatedType(field.getType(), NullableLookup.isNullable(field));
                     } catch (NotFoundException e) {
                         throw new TypeCheckFailure(e);
                     }
@@ -379,7 +402,7 @@ public final class Typechecker {
         return null;
     }
 
-    private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
+    private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, EvaluatedType... argTypes) {
         try {
             methodCheckLoop:
             for (CtMethod maybe : methods) {
@@ -387,23 +410,34 @@ public final class Typechecker {
                 if (!isAccessible(maybe)) continue;
                 if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
                 CtClass[] methodParamTypes = maybe.getParameterTypes();
+                boolean[] nullableParams = NullableLookup.nullableParams(maybe);
                 if (Modifier.isVarArgs(maybe.getModifiers())) {
                     if (argTypes.length < methodParamTypes.length - 1) continue;
                     for (int i = 0; i < methodParamTypes.length - 1; i++) {
-                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
+                        if (argTypes[i].isNullable() && !nullableParams[i]) {
+                            continue methodCheckLoop;
+                        }
+                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i].getJavassist())) {
                             continue methodCheckLoop;
                         }
                     }
+                    boolean areVarargsNullable = nullableParams[methodParamTypes.length - 1];
                     String varargType = methodParamTypes[methodParamTypes.length - 1].getComponentType().getName();
                     for (int i = methodParamTypes.length - 1; i < argTypes.length; i++) {
-                        if (!checkTypeAssignable(varargType, argTypes[i])) {
+                        if (argTypes[i].isNullable() && !areVarargsNullable) {
+                            continue methodCheckLoop;
+                        }
+                        if (!checkTypeAssignable(varargType, argTypes[i].getJavassist())) {
                             continue methodCheckLoop;
                         }
                     }
                 } else {
                     if (methodParamTypes.length != argTypes.length) continue;
                     for (int i = 0; i < methodParamTypes.length; i++) {
-                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i])) {
+                        if (argTypes[i].isNullable() && !nullableParams[i]) {
+                            continue methodCheckLoop;
+                        }
+                        if (!checkTypeAssignable(methodParamTypes[i].getName(), argTypes[i].getJavassist())) {
                             continue methodCheckLoop;
                         }
                     }
@@ -424,7 +458,7 @@ public final class Typechecker {
         throw new TypeCheckFailure(error.toString());
     }
 
-    private static CtMethod findMethod(CtClass clazz, String name, boolean checkName, boolean staticOnly, CtClass... argTypes) {
+    private static CtMethod findMethod(CtClass clazz, String name, boolean checkName, boolean staticOnly, EvaluatedType... argTypes) {
         return findMethod(clazz.getMethods(), name, checkName, staticOnly, argTypes);
     }
 

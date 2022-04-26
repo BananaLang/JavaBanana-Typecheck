@@ -41,7 +41,7 @@ public final class MethodCall {
             return returnType;
         }
         try {
-            return returnType = isScriptMethod() ? scriptMethod.getReturnType() : new EvaluatedType(javaMethod.getReturnType());
+            return returnType = isScriptMethod() ? scriptMethod.getReturnType() : new EvaluatedType(javaMethod.getReturnType(), NullableLookup.isNullable(javaMethod));
         } catch (NotFoundException e) {
             throw new TypeCheckFailure(e);
         }
@@ -60,9 +60,10 @@ public final class MethodCall {
             } catch (NotFoundException e) {
                 throw new TypeCheckFailure(e);
             }
+            boolean[] nullableAnnotation = NullableLookup.nullableParams(javaMethod);
             argTypes = new EvaluatedType[ctArgTypes.length];
             for (int i = 0; i < ctArgTypes.length; i++) {
-                argTypes[i] = new EvaluatedType(ctArgTypes[i]);
+                argTypes[i] = new EvaluatedType(ctArgTypes[i], nullableAnnotation[i]);
             }
             return argTypes;
         }
