@@ -389,7 +389,20 @@ public final class Typechecker {
             types.put(expr, valueType);
         } else if (expr instanceof BinaryExpression) {
             BinaryExpression binExpr = (BinaryExpression)expr;
+            EvaluatedType leftType = evaluateExpression(binExpr.left);
+            EvaluatedType rightType = evaluateExpression(binExpr.right);
             switch (binExpr.type) {
+                case NULL_COALESCE: {
+                    if (!leftType.isNullable()) {
+                        throw new TypeCheckFailure("Left-hand-side of ?? must be nullable");
+                    }
+                    if (rightType == EvaluatedType.NULL) {
+                        throw new TypeCheckFailure("Right-hand side of ?? cannot be literal null");
+                    }
+                    EvaluatedType moreGeneral = rightType.isAssignableTo(leftType) ? leftType : rightType;
+                    types.put(expr, moreGeneral.nullable(rightType.isNullable()));
+                    break;
+                }
                 default:
                     throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet");
             }

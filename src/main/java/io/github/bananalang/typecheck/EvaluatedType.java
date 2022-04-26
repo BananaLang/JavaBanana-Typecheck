@@ -46,7 +46,7 @@ public final class EvaluatedType {
     }
 
     public EvaluatedType nullable(boolean nullable) {
-        if (nullable == isNullable()) {
+        if (nullable == this.nullable) {
             return this;
         }
         return new EvaluatedType(getJavassist(), nullable);
@@ -76,18 +76,18 @@ public final class EvaluatedType {
         if (!(o instanceof EvaluatedType)) {
             return false;
         }
+        if (this == o) {
+            return true;
+        }
         EvaluatedType other = (EvaluatedType)o;
         return nullable == other.nullable && name.equals(other.name);
     }
 
     public boolean isAssignableTo(EvaluatedType type) {
-        if (nullable && !type.nullable) {
-            return false;
-        }
         if (equals(type)) {
             return true;
         }
-        if (!(type instanceof EvaluatedType)) {
+        if (nullable && !type.nullable) {
             return false;
         }
         EvaluatedType ljrt = (EvaluatedType)type;
