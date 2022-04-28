@@ -66,15 +66,56 @@ public final class NullableLookup {
         boolean[] cachedResult = NULLABLE_PARAMS_CACHE.computeIfAbsent(behavior, key -> {
             boolean[] result = new boolean[Descriptor.numOfParameters(key.getSignature())];
             Object[][] annotations = key.getAvailableParameterAnnotations();
+            int foundCount = 0;
             for (int i = 0; i < result.length; i++) {
-                final int i2 = i;
+                String[] annotationNames = new String[annotations[i].length];
+                for (int j = 0; j < annotationNames.length; j++) {
+                    annotationNames[j] = annotations[i][j].getClass().getInterfaces()[0].getName();
+                }
                 Boolean isParamNullable = isNullable0(ann -> {
-                    for (Object check : annotations[i2]) {
-                        return check.getClass().getName().equals(ann);
+                    for (String check : annotationNames) {
+                        return check.equals(ann);
                     }
                     return false;
                 });
-                result[i] = isParamNullable != null ? isParamNullable : true;
+                if (isParamNullable != null) {
+                    result[i] = isParamNullable;
+                    foundCount++;
+                } else {
+                    result[i] = true;
+                }
+            }
+            if (foundCount == 0) {
+                // Do a stub lookup
+                String altMemberClassName = "banana.stubs." + key.getDeclaringClass().getName();
+                try {
+                    CtClass altMemberClass = key.getDeclaringClass().getClassPool().get(altMemberClassName);
+                    CtBehavior altMember;
+                    if (key instanceof CtConstructor) {
+                        altMember = altMemberClass.getConstructor(key.getSignature());
+                    } else if (key instanceof CtMethod) {
+                        altMember = altMemberClass.getMethod(key.getName(), key.getSignature());
+                    } else {
+                        throw new AssertionError(key.getClass());
+                    }
+                    Object[][] altAnnotations = altMember.getAvailableParameterAnnotations();
+                    for (int i = 0; i < result.length; i++) {
+                        String[] annotationNames = new String[altAnnotations[i].length];
+                        for (int j = 0; j < annotationNames.length; j++) {
+                            annotationNames[j] = altAnnotations[i][j].getClass().getInterfaces()[0].getName();
+                        }
+                        Boolean isParamNullable = isNullable0(ann -> {
+                            for (String check : annotationNames) {
+                                return check.equals(ann);
+                            }
+                            return false;
+                        });
+                        if (isParamNullable != null) {
+                            result[i] = isParamNullable;
+                        }
+                    }
+                } catch (NotFoundException e) {
+                }
             }
             return result;
         });

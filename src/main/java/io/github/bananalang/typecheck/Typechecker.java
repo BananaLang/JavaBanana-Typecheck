@@ -548,6 +548,10 @@ public final class Typechecker {
     }
 
     static boolean checkTypeAssignable(String assignTo, CtClass expr) {
+        if (expr == null) {
+            // null is assignable to everything. At this point we've already done nullness checks.
+            return true;
+        }
         if (assignTo.equals(expr.getName())) {
             return true; // Fast path
         }

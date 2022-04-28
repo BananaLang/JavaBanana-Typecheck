@@ -17,7 +17,7 @@ public class TypeTest {
             "def String concat(String a, String b, String c) {" +
                 "return a.concat(b).concat(c);" +
             "}" +
-            "println(join(\"hello\", \"world\"));"
+            "println(join(\"hello\", null));"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());
