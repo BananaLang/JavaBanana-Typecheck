@@ -32,6 +32,12 @@ public final class NullableLookup {
     }
 
     public static boolean isNullable(CtMember member) {
+        if (
+            member instanceof CtConstructor ||
+            (member instanceof CtMethod && ((CtMethod)member).getSignature().endsWith(")V"))
+        ) {
+            return false; // void isn't nullable
+        }
         return NULLABLE_MEMBER_CACHE.computeIfAbsent(member, key -> {
             Boolean result = isNullable0(key::hasAnnotation);
             if (result == null) {
