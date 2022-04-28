@@ -31,12 +31,12 @@ jobs:
         run: mvn deploy
       - name: Upload artifact
         uses: actions/upload-artifact@v2
-        if: ${{ matrix.java == 8 && matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.java == 9 && matrix.os == 'ubuntu-latest' }}
         with:
           name: javabanana-jar-artifact
           path: target/JavaBanana-*.jar
       - name: Push to Maven repository
-        if: ${{ matrix.java == 8 && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref_type != 'tag' }}
+        if: ${{ matrix.java == 9 && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref_type != 'tag' }}
         run: |
           cd target/mvn-repo
           git config --local user.email "action@github.com"

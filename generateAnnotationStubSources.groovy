@@ -14,14 +14,15 @@ class FieldOrMethodInfo {
     String[] argAnnotations
 }
 
-log.info 'Generating annotation stubs...'
+def threadCount = Runtime.runtime.availableProcessors()
+log.info "Generating annotation stubs with $threadCount threads..."
 def start = System.currentTimeMillis()
 
 def jdkAnnotationsDir = Paths.get("${project.basedir}/jdkAnnotations/jdkAnnotations")
 def stubsBaseDir = new File("${project.build.directory}/generated-sources/banana/stubs")
 stubsBaseDir.mkdirs()
 
-Executors.newFixedThreadPool(Runtime.runtime.availableProcessors()).with {
+Executors.newFixedThreadPool(threadCount).with {
     Files.walk(jdkAnnotationsDir).filter { !Files.isDirectory(it) }.forEach { annotationPackage ->
         execute {
             log.info "Processing $annotationPackage"
