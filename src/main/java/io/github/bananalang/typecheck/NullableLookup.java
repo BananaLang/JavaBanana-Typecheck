@@ -35,7 +35,7 @@ public final class NullableLookup {
         return NULLABLE_MEMBER_CACHE.computeIfAbsent(member, key -> {
             Boolean result = isNullable0(key::hasAnnotation);
             if (result == null) {
-                String altMemberClassName = "banana.nullstubs." + key.getDeclaringClass().getName() + "Stubs";
+                String altMemberClassName = "banana.stubs." + key.getDeclaringClass().getName() + "Stubs";
                 try {
                     CtClass altMemberClass = key.getDeclaringClass().getClassPool().get(altMemberClassName);
                     CtMember altMember;

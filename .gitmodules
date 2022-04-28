@@ -1,0 +1,3 @@
+[submodule "jdkAnnotations"]
+	path = jdkAnnotations
+	url = https://github.com/BananaLang/IntelliJ-jdkAnnotations
