@@ -280,7 +280,7 @@ public final class Typechecker {
                 }
                 CtClass clazz = targetType.getJavassist();
                 method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
-                methodReturnType = method.getReturnType().nullable(method.getReturnType().isNullable() || ae.safeNavigation);
+                methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
                 List<ScriptMethod> checkMethods = definedMethods.get(ie.identifier);
