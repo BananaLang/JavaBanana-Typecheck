@@ -24,6 +24,7 @@ import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
 import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
+import io.github.bananalang.parse.ast.IfOrWhileStatement;
 import io.github.bananalang.parse.ast.ImportStatement;
 import io.github.bananalang.parse.ast.NullExpression;
 import io.github.bananalang.parse.ast.ReturnStatement;
@@ -44,7 +45,7 @@ import javassist.NotFoundException;
 
 public final class Typechecker {
     private static final Map<Map.Entry<String, String>, Boolean> cachedAssignableLookups = new HashMap<>();
-    private static final CtClass CT_JLO, CT_JLS;
+    static final CtClass CT_JLO, CT_JLS;
     private static final EvaluatedType ET_JLS, ET_VOID;
 
     static {
@@ -64,7 +65,7 @@ public final class Typechecker {
     private final ClassPool cp;
     private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
-    private final Map<CallExpression, MethodCall> methodCalls = new IdentityHashMap<>();
+    private final Map<ASTNode, MethodCall> methodCalls = new IdentityHashMap<>();
     private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
     private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
     private EvaluatedType returnType = ET_VOID;
@@ -94,7 +95,11 @@ public final class Typechecker {
         return Collections.unmodifiableMap(scopes);
     }
 
-    public MethodCall getMethodCall(CallExpression node) {
+    public Map<String, LocalVariable> getScope(StatementList owner) {
+        return scopes.get(owner);
+    }
+
+    public MethodCall getMethodCall(ASTNode node) {
         return methodCalls.get(node);
     }
 
@@ -187,6 +192,24 @@ public final class Typechecker {
             } else {
                 verifyTypeAssignable(returnType, checkType);
             }
+        } else if (root instanceof IfOrWhileStatement) {
+            IfOrWhileStatement ifOrWhileStmt = (IfOrWhileStatement)root;
+            EvaluatedType conditionType = evaluateExpression(ifOrWhileStmt.condition);
+            CtMethod method;
+            try {
+                method = conditionType.getJavassist().getMethod("truthy", "()Z");
+            } catch (NotFoundException e) {
+                try {
+                    method = conditionType.getJavassist().getMethod("isEmpty", "()Z");
+                } catch (NotFoundException e2) {
+                    method = null; // Null check *only*
+                    if (!conditionType.isNullable()) {
+                        // TODO: make this a warning somehow
+                    }
+                }
+            }
+            methodCalls.put(ifOrWhileStmt, ifNotNull(method, MethodCall::new));
+            typecheck0(ifOrWhileStmt.body);
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
         }
@@ -387,7 +410,7 @@ public final class Typechecker {
                 if (variable == null) {
                     throw new TypeCheckFailure("Variable " + variable + " is not defined");
                 }
-                if (!variable.getType().isAssignableTo(valueType)) {
+                if (!valueType.isAssignableTo(variable.getType())) {
                     throw new TypeCheckFailure(
                         "Cannot assign expression of type " + valueType +
                         " to variable " + variable + " of type " + variable.getType()

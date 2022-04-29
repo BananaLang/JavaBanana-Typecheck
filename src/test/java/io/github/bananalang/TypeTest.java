@@ -11,13 +11,17 @@ import javassist.LoaderClassPath;
 public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
-            "def var join(String? a, String? b) {" +
-                "return concat(a ?? \"null\", \" \", b ?? \"null\");" +
+            "def String? a = \"hello\";" +
+            "if (a) {" +
+                "println(\"uno\");" +
             "}" +
-            "def String concat(String a, String b, String c) {" +
-                "return a.concat(b).concat(c);" +
+            "a = null;" +
+            "if (a) {" +
+                "println(\"dos\");" +
             "}" +
-            "println(join(\"hello\", null));"
+            "if (\"\".getClass()) {" +
+                "println(\"tres\");" +
+            "}"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());

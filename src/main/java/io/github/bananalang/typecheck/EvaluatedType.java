@@ -84,14 +84,14 @@ public final class EvaluatedType {
     }
 
     public boolean isAssignableTo(EvaluatedType type) {
-        if (equals(type)) {
-            return true;
-        }
         if (this == NULL) {
             return type.nullable;
         }
         if (nullable && !type.nullable) {
             return false;
+        }
+        if (name.equals(type.name)) {
+            return true;
         }
         EvaluatedType ljrt = (EvaluatedType)type;
         return Typechecker.checkTypeAssignable(ljrt.getName(), getJavassist());

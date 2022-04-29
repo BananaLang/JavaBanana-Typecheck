@@ -18,6 +18,14 @@ public final class NullableLookup {
     private static final Map<CtMember, Boolean> NULLABLE_MEMBER_CACHE = new IdentityHashMap<>();
     private static final Map<CtBehavior, boolean[]> NULLABLE_PARAMS_CACHE = new IdentityHashMap<>();
 
+    static {
+        try {
+            NULLABLE_MEMBER_CACHE.put(Typechecker.CT_JLO.getMethod("getClass", "()Ljava/lang/Class;"), Boolean.FALSE);
+        } catch (NotFoundException e) {
+            throw new Error(e);
+        }
+    }
+
     private NullableLookup() {
     }
 
