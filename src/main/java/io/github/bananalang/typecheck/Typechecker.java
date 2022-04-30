@@ -196,15 +196,19 @@ public final class Typechecker {
             IfOrWhileStatement ifOrWhileStmt = (IfOrWhileStatement)root;
             EvaluatedType conditionType = evaluateExpression(ifOrWhileStmt.condition);
             CtMethod method;
-            try {
-                method = conditionType.getJavassist().getMethod("truthy", "()Z");
-            } catch (NotFoundException e) {
+            if (conditionType == EvaluatedType.NULL) {
+                method = null;
+            } else {
                 try {
-                    method = conditionType.getJavassist().getMethod("isEmpty", "()Z");
-                } catch (NotFoundException e2) {
-                    method = null; // Null check *only*
-                    if (!conditionType.isNullable()) {
-                        // TODO: make this a warning somehow
+                    method = conditionType.getJavassist().getMethod("truthy", "()Z");
+                } catch (NotFoundException e) {
+                    try {
+                        method = conditionType.getJavassist().getMethod("isEmpty", "()Z");
+                    } catch (NotFoundException e2) {
+                        method = null; // Null check *only*
+                        if (!conditionType.isNullable()) {
+                            // TODO: make this a warning somehow
+                        }
                     }
                 }
             }
@@ -300,6 +304,9 @@ public final class Typechecker {
                 }
                 if (targetType.getName().equals("void")) {
                     throw new TypeCheckFailure("Cannot call method on void");
+                }
+                if (targetType == EvaluatedType.NULL) {
+                    throw new TypeCheckFailure("Cannot call methods on literal null");
                 }
                 CtClass clazz = targetType.getJavassist();
                 method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
