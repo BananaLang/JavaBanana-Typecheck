@@ -1,8 +1,8 @@
 package io.github.bananalang.typecheck;
 
-import java.util.Map;
 import java.util.Arrays;
 import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.function.Predicate;
 
 import javassist.CtBehavior;
@@ -12,7 +12,6 @@ import javassist.CtField;
 import javassist.CtMember;
 import javassist.CtMethod;
 import javassist.NotFoundException;
-import javassist.bytecode.Descriptor;
 
 public final class NullableLookup {
     private static final Map<CtMember, Boolean> NULLABLE_MEMBER_CACHE = new IdentityHashMap<>();
@@ -72,10 +71,21 @@ public final class NullableLookup {
 
     public static boolean[] nullableParams(CtBehavior behavior) {
         boolean[] cachedResult = NULLABLE_PARAMS_CACHE.computeIfAbsent(behavior, key -> {
-            boolean[] result = new boolean[Descriptor.numOfParameters(key.getSignature())];
+            CtClass[] paramTypes;
+            try {
+                paramTypes = key.getParameterTypes();
+            } catch (NotFoundException e) {
+                throw new TypeCheckFailure(e);
+            }
+            boolean[] result = new boolean[paramTypes.length];
             Object[][] annotations = key.getAvailableParameterAnnotations();
             int foundCount = 0;
             for (int i = 0; i < result.length; i++) {
+                if (paramTypes[i].isPrimitive()) {
+                    result[i] = false;
+                    foundCount++;
+                    continue;
+                }
                 String[] annotationNames = new String[annotations[i].length];
                 for (int j = 0; j < annotationNames.length; j++) {
                     annotationNames[j] = annotations[i][j].getClass().getInterfaces()[0].getName();
