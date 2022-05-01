@@ -68,6 +68,10 @@ public final class EvaluatedType {
         return this == NULL ? "java/lang/Void" : Descriptor.toJvmName(getJavassist());
     }
 
+    public String getDescriptor() {
+        return this == NULL ? "Ljava/lang/Void;" : Descriptor.of(getJavassist());
+    }
+
     @Override
     public String toString() {
         if (nullable) {
