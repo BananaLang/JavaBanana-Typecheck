@@ -68,6 +68,7 @@ public final class Typechecker {
     private final Map<ASTNode, MethodCall> methodCalls = new IdentityHashMap<>();
     private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
     private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
+    private final Map<String, GlobalVariable> definedGlobals = new HashMap<>();
     private EvaluatedType returnType = ET_VOID;
     private final List<EvaluatedType> potentialReturns = new ArrayList<>();
     private final List<LocalVariable> functionArgs = new ArrayList<>();
@@ -83,7 +84,7 @@ public final class Typechecker {
 
     public void typecheck(StatementList root) {
         evaluateImports(root);
-        evaluateMethodHeaders(root);
+        evaluateGlobalsAndMethodHeaders(root);
         typecheck0(root);
     }
 
@@ -129,10 +130,18 @@ public final class Typechecker {
         } else if (root instanceof VariableDeclarationStatement) {
             VariableDeclarationStatement vds = (VariableDeclarationStatement)root;
             EvaluatedType[] declTypes = new EvaluatedType[vds.declarations.length];
+            boolean isGlobalDecl = vds.isGlobalVariableDef();
             for (int i = 0; i < vds.declarations.length; i++) {
                 VariableDeclaration decl = vds.declarations[i];
-                if (currentScope.containsKey(decl.name)) {
+                if (!isGlobalDecl && currentScope.containsKey(decl.name)) {
                     throw new TypeCheckFailure("Duplicate variable " + decl.name);
+                }
+                GlobalVariable global = null;
+                if (isGlobalDecl) {
+                    global = definedGlobals.get(decl.name);
+                    if (global == null) {
+                        throw new TypeCheckFailure("Attempting to create local variable in illegal location");
+                    }
                 }
                 if (decl.value != null) {
                     EvaluatedType exprType = evaluateExpression(decl.value);
@@ -141,13 +150,26 @@ public final class Typechecker {
                     }
                     if (decl.type == null) {
                         declTypes[i] = exprType;
+                    } else if (isGlobalDecl) {
+                        verifyTypeAssignable(global.getType(), exprType);
                     } else {
                         verifyTypeAssignable(declTypes[i] = evaluateType(decl.type), exprType);
                     }
-                } else {
+                } else if (!isGlobalDecl) {
                     declTypes[i] = evaluateType(decl.type);
                 }
-                currentScope.put(decl.name, new LocalVariable(decl.name, declTypes[i], currentScope.size(), decl.value != null));
+                if (isGlobalDecl) {
+                    if (global.getType() == null) {
+                        global.setType(declTypes[i]);
+                    }
+                } else {
+                    currentScope.put(decl.name, new LocalVariable(
+                        decl.name,
+                        declTypes[i],
+                        currentScope.size(),
+                        decl.value != null
+                    ));
+                }
             }
         } else if (root instanceof FunctionDefinitionStatement) {
             FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)root;
@@ -222,25 +244,42 @@ public final class Typechecker {
         }
     }
 
-    private void evaluateMethodHeaders(StatementList root) {
+    private void evaluateGlobalsAndMethodHeaders(StatementList root) {
         for (StatementNode stmt : root.children) {
-            if (!(stmt instanceof FunctionDefinitionStatement)) continue;
-            FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)stmt;
-            EvaluatedType[] argTypes = new EvaluatedType[functionDef.args.length];
-            for (int i = 0; i < argTypes.length; i++) {
-                VariableDeclaration arg = functionDef.args[i];
-                if (arg.type == null) {
-                    argTypes[i] = evaluateExpression(arg.value);
-                } else {
-                    argTypes[i] = evaluateType(arg.type);
-                    if (arg.value != null) {
-                        verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value));
+            if (stmt instanceof FunctionDefinitionStatement) {
+                FunctionDefinitionStatement functionDef = (FunctionDefinitionStatement)stmt;
+                EvaluatedType[] argTypes = new EvaluatedType[functionDef.args.length];
+                for (int i = 0; i < argTypes.length; i++) {
+                    VariableDeclaration arg = functionDef.args[i];
+                    if (arg.type == null) {
+                        argTypes[i] = evaluateExpression(arg.value);
+                    } else {
+                        argTypes[i] = evaluateType(arg.type);
+                        if (arg.value != null) {
+                            verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value));
+                        }
                     }
                 }
+                ScriptMethod method = new ScriptMethod(
+                    functionDef.name,
+                    ifNotNull(functionDef.returnType, this::evaluateType),
+                    argTypes
+                );
+                methodDefinitions.put(functionDef, method);
+                definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>(1)).add(method);
+            } else if (stmt instanceof VariableDeclarationStatement) {
+                VariableDeclarationStatement varDef = (VariableDeclarationStatement)stmt;
+                if (!varDef.isGlobalVariableDef()) {
+                    continue;
+                }
+                for (VariableDeclaration decl : varDef.declarations) {
+                    definedGlobals.put(decl.name, new GlobalVariable(
+                        decl.name,
+                        ifNotNull(decl.type, this::evaluateType),
+                        varDef.modifiers
+                    ));
+                }
             }
-            ScriptMethod method = new ScriptMethod(functionDef.name, ifNotNull(functionDef.returnType, this::evaluateType), argTypes);
-            methodDefinitions.put(functionDef, method);
-            definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>(1)).add(method);
         }
     }
 
@@ -388,12 +427,25 @@ public final class Typechecker {
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
-            LocalVariable variable = evaluateVariable(ie.identifier);
-            if (variable != null) {
-                if (!variable.isAssigned()) {
-                    throw new TypeCheckFailure("Variable " + variable.getName() + " accessed before it's assigned to");
+            {
+                LocalVariable variable = evaluateVariable(ie.identifier);
+                if (variable != null) {
+                    if (!variable.isAssigned()) {
+                        throw new TypeCheckFailure("Variable " + variable.getName() + " accessed before it's assigned to");
+                    }
+                    type = variable.getType();
                 }
-                type = variable.getType();
+            }
+            if (type == null) {
+                GlobalVariable variable = definedGlobals.get(ie.identifier);
+                if (variable != null) {
+                    type = variable.getType();
+                    if (type == null) {
+                        throw new TypeCheckFailure(
+                            "Forward reference to a global variable with an inferred type"
+                        );
+                    }
+                }
             }
             if (type == null) {
                 Imported<?> imported = imports.get(ie.identifier);
