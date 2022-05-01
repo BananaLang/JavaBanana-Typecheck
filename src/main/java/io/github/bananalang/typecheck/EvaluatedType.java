@@ -3,6 +3,7 @@ package io.github.bananalang.typecheck;
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.NotFoundException;
+import javassist.bytecode.Descriptor;
 
 public final class EvaluatedType {
     public static final EvaluatedType NULL = new EvaluatedType(null, "null", true);
@@ -63,6 +64,10 @@ public final class EvaluatedType {
         }
     }
 
+    public String getJvmName() {
+        return this == NULL ? "java/lang/Void" : Descriptor.toJvmName(getJavassist());
+    }
+
     @Override
     public String toString() {
         if (nullable) {
@@ -86,6 +91,9 @@ public final class EvaluatedType {
     public boolean isAssignableTo(EvaluatedType type) {
         if (this == NULL) {
             return type.nullable;
+        }
+        if (type == NULL) {
+            return false; // Cannot assign anything but literal null to inferred literal null type
         }
         if (nullable && !type.nullable) {
             return false;

@@ -11,10 +11,12 @@ import javassist.LoaderClassPath;
 public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
-            "def String? a = \"hello\";" +
-            "if (a = null) {" +
-                "println(a);" +
-            "}"
+            "def var a = null;\n" +
+            "if (a) {\n" +
+                "println(a);\n" +
+            "} else {\n" +
+                "a = null;\n" +
+            "}\n"
         ).parse();
 
         ClassPool cp = new ClassPool(ClassPool.getDefault());

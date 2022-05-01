@@ -214,6 +214,9 @@ public final class Typechecker {
             }
             methodCalls.put(ifOrWhileStmt, ifNotNull(method, MethodCall::new));
             typecheck0(ifOrWhileStmt.body);
+            if (ifOrWhileStmt.elseBody != null) {
+                typecheck0(ifOrWhileStmt.elseBody);
+            }
         } else if (!(root instanceof ImportStatement)) {
             throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
         }
@@ -420,7 +423,7 @@ public final class Typechecker {
                 if (!valueType.isAssignableTo(variable.getType())) {
                     throw new TypeCheckFailure(
                         "Cannot assign expression of type " + valueType +
-                        " to variable " + variable + " of type " + variable.getType()
+                        " to variable " + variable.getName() + " of type " + variable.getType()
                     );
                 }
                 variable.setAssigned(true);
