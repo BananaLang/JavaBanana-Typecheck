@@ -4,12 +4,10 @@ import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -92,10 +90,6 @@ public final class Typechecker {
         return types.get(node);
     }
 
-    public Map<StatementList, Map<String, LocalVariable>> getScopes() {
-        return Collections.unmodifiableMap(scopes);
-    }
-
     public Map<String, LocalVariable> getScope(StatementList owner) {
         return scopes.get(owner);
     }
@@ -108,11 +102,15 @@ public final class Typechecker {
         return methodDefinitions.get(node);
     }
 
+    public GlobalVariable getGlobalVariable(String name) {
+        return definedGlobals.get(name);
+    }
+
     private void typecheck0(ASTNode root) {
         if (root instanceof StatementList) {
             StatementList sl = (StatementList)root;
             scopeStack.addLast(sl);
-            scopes.put(sl, currentScope = new LinkedHashMap<>());
+            scopes.put(sl, currentScope = new HashMap<>());
             if (!functionArgs.isEmpty()) {
                 for (LocalVariable arg : functionArgs) {
                     currentScope.put(arg.getName(), arg);
