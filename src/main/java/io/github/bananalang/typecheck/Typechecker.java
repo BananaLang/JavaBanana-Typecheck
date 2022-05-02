@@ -158,7 +158,7 @@ public final class Typechecker {
                 }
                 if (isGlobalDecl) {
                     if (global.getType() == null) {
-                        global.setType(declTypes[i]);
+                        global.setType(declTypes[i].nullable(true));
                     }
                 } else {
                     currentScope.put(decl.name, new LocalVariable(
@@ -273,7 +273,7 @@ public final class Typechecker {
                 for (VariableDeclaration decl : varDef.declarations) {
                     definedGlobals.put(decl.name, new GlobalVariable(
                         decl.name,
-                        ifNotNull(decl.type, this::evaluateType),
+                        ifNotNull(decl.type, t -> evaluateType(t).nullable(true)),
                         varDef.modifiers
                     ));
                 }
