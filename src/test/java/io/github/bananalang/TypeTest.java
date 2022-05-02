@@ -12,6 +12,7 @@ public class TypeTest {
     public static void main(String[] args) throws IOException {
         StatementList root = new Parser(
             "def public var test() {\n" +
+                "hello = null;\n" +
                 "println(hello);\n" +
             "}\n" +
             "def global String hello = \"Hello world!\";\n" +

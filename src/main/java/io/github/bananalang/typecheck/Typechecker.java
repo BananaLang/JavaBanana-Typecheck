@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import io.github.bananalang.JavaBananaConstants;
 import io.github.bananalang.parse.ast.ASTNode;
 import io.github.bananalang.parse.ast.AccessExpression;
 import io.github.bananalang.parse.ast.AssignmentExpression;
@@ -81,9 +82,16 @@ public final class Typechecker {
     }
 
     public void typecheck(StatementList root) {
+        double startTime = System.nanoTime();
+        if (JavaBananaConstants.DEBUG) {
+            System.out.println("Beginning typecheck of 0x" + Integer.toHexString(root.hashCode()));
+        }
         evaluateImports(root);
         evaluateGlobalsAndMethodHeaders(root);
         typecheck0(root);
+        if (JavaBananaConstants.DEBUG) {
+            System.out.println("Finished typecheck in " + (System.nanoTime() - startTime) / 1_000_000D + "ms");
+        }
     }
 
     public EvaluatedType getType(ASTNode node) {
@@ -466,17 +474,33 @@ public final class Typechecker {
             EvaluatedType valueType = evaluateExpression(assignExpr.value);
             if (assignExpr.target instanceof IdentifierExpression) {
                 IdentifierExpression identifierExpr = (IdentifierExpression)assignExpr.target;
-                LocalVariable variable = evaluateVariable(identifierExpr.identifier);
-                if (variable == null) {
-                    throw new TypeCheckFailure("Variable " + variable + " is not defined");
+                LocalVariable local = evaluateVariable(identifierExpr.identifier);
+                if (local != null) {
+                    if (!valueType.isAssignableTo(local.getType())) {
+                        throw new TypeCheckFailure(
+                            "Cannot assign expression of type " + valueType +
+                            " to variable " + local.getName() + " of type " + local.getType()
+                        );
+                    }
+                    local.setAssigned(true);
+                } else {
+                    GlobalVariable global = definedGlobals.get(identifierExpr.identifier);
+                    if (global != null) {
+                        if (global.getType() == null) {
+                            throw new TypeCheckFailure(
+                                "Forward reference to a global variable with an inferred type"
+                            );
+                        }
+                        if (!valueType.isAssignableTo(global.getType())) {
+                            throw new TypeCheckFailure(
+                                "Cannot assign expression of type " + valueType +
+                                " to global variable " + global.getName() + " of type " + global.getType()
+                            );
+                        }
+                    } else {
+                        throw new TypeCheckFailure("Variable " + identifierExpr.identifier + " is not defined");
+                    }
                 }
-                if (!valueType.isAssignableTo(variable.getType())) {
-                    throw new TypeCheckFailure(
-                        "Cannot assign expression of type " + valueType +
-                        " to variable " + variable.getName() + " of type " + variable.getType()
-                    );
-                }
-                variable.setAssigned(true);
             } else {
                 throw new TypeCheckFailure("Non-direct assignments not supported yet");
             }
