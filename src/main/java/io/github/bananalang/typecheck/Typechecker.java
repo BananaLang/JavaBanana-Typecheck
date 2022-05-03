@@ -14,6 +14,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import io.github.bananalang.JavaBananaConstants;
+import io.github.bananalang.compilecommon.problems.ProblemCollector;
 import io.github.bananalang.parse.ast.ASTNode;
 import io.github.bananalang.parse.ast.AccessExpression;
 import io.github.bananalang.parse.ast.AssignmentExpression;
@@ -59,9 +60,10 @@ public final class Typechecker {
         ET_VOID = new EvaluatedType(CtPrimitiveType.voidType, false);
     }
 
+    private final ClassPool cp;
+    private final ProblemCollector problemCollector;
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final Map<String, Imported<?>> imports = new HashMap<>();
-    private final ClassPool cp;
     private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
     private final Map<ASTNode, MethodCall> methodCalls = new IdentityHashMap<>();
@@ -73,12 +75,13 @@ public final class Typechecker {
     private final List<LocalVariable> functionArgs = new ArrayList<>();
     private Map<String, LocalVariable> currentScope = null;
 
-    public Typechecker(ClassPool cp) {
+    public Typechecker(ClassPool cp, ProblemCollector problemCollector) {
         this.cp = cp;
+        this.problemCollector = problemCollector;
     }
 
-    public Typechecker() {
-        this(ClassPool.getDefault());
+    public Typechecker(ProblemCollector problemCollector) {
+        this(ClassPool.getDefault(), problemCollector);
     }
 
     public void typecheck(StatementList root) {
@@ -88,10 +91,15 @@ public final class Typechecker {
         }
         evaluateImports(root);
         evaluateGlobalsAndMethodHeaders(root);
-        typecheck0(root);
+        try {
+            typecheck0(root);
+        } catch (TypeCheckFailure e) {
+            problemCollector.error(e.getMessage(), e.row, e.column);
+        }
         if (JavaBananaConstants.DEBUG) {
             System.out.println("Finished typecheck in " + (System.nanoTime() - startTime) / 1_000_000D + "ms");
         }
+        problemCollector.throwIfFailing();
     }
 
     public EvaluatedType getType(ASTNode node) {
@@ -140,26 +148,26 @@ public final class Typechecker {
             for (int i = 0; i < vds.declarations.length; i++) {
                 VariableDeclaration decl = vds.declarations[i];
                 if (!isGlobalDecl && currentScope.containsKey(decl.name)) {
-                    throw new TypeCheckFailure("Duplicate variable " + decl.name);
+                    error("Duplicate variable", root);
                 }
                 GlobalVariable global = null;
                 if (isGlobalDecl) {
                     global = definedGlobals.get(decl.name);
                     if (global == null) {
-                        throw new TypeCheckFailure("Attempting to create local variable in illegal location");
+                        error("Attempting to create local variable in illegal location", root);
                     }
                 }
                 if (decl.value != null) {
                     EvaluatedType exprType = evaluateExpression(decl.value);
                     if (exprType.getName().equals("void")) {
-                        throw new TypeCheckFailure("Cannot create void variable");
+                        error("Cannot create void variable", root);
                     }
                     if (decl.type == null) {
                         declTypes[i] = exprType;
                     } else if (isGlobalDecl) {
-                        verifyTypeAssignable(global.getType(), exprType);
+                        verifyTypeAssignable(global.getType(), exprType, problemCollector);
                     } else {
-                        verifyTypeAssignable(declTypes[i] = evaluateType(decl.type), exprType);
+                        verifyTypeAssignable(declTypes[i] = evaluateType(decl.type), exprType, problemCollector);
                     }
                 } else if (!isGlobalDecl) {
                     declTypes[i] = evaluateType(decl.type);
@@ -201,7 +209,7 @@ public final class Typechecker {
                             continue;
                         }
                         if (!returnType.isAssignableTo(maybeReturnType)) {
-                            throw new TypeCheckFailure("Incompatible return types: " + returnType + " and " + maybeReturnType);
+                            error("Incompatible return types: " + returnType + " and " + maybeReturnType, root);
                         }
                         returnType = maybeReturnType;
                     }
@@ -218,7 +226,7 @@ public final class Typechecker {
             if (returnType == null) {
                 potentialReturns.add(checkType);
             } else {
-                verifyTypeAssignable(returnType, checkType);
+                verifyTypeAssignable(returnType, checkType, problemCollector);
             }
         } else if (root instanceof IfOrWhileStatement) {
             IfOrWhileStatement ifOrWhileStmt = (IfOrWhileStatement)root;
@@ -235,7 +243,13 @@ public final class Typechecker {
                     } catch (NotFoundException e2) {
                         method = null; // Null check *only*
                         if (!conditionType.isNullable()) {
-                            // TODO: make this a warning somehow
+                            warning(
+                                "Condition does not support truthiness testing, nor is it nullable. " +
+                                (ifOrWhileStmt.isWhile
+                                    ? "This while statement will never exit unless break is used."
+                                    : "This if statement will be inlined."),
+                                ifOrWhileStmt.condition
+                            );
                         }
                     }
                 }
@@ -246,7 +260,7 @@ public final class Typechecker {
                 typecheck0(ifOrWhileStmt.elseBody);
             }
         } else if (!(root instanceof ImportStatement)) {
-            throw new TypeCheckFailure("Typechecking of " + root.getClass().getSimpleName() + " not supported yet");
+            error("Typechecking of " + root.getClass().getSimpleName() + " not supported yet", root);
         }
     }
 
@@ -262,7 +276,7 @@ public final class Typechecker {
                     } else {
                         argTypes[i] = evaluateType(arg.type);
                         if (arg.value != null) {
-                            verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value));
+                            verifyTypeAssignable(argTypes[i], evaluateExpression(arg.value), problemCollector);
                         }
                     }
                 }
@@ -334,7 +348,7 @@ public final class Typechecker {
             for (int i = 0; i < ce.args.length; i++) {
                 EvaluatedType evaluated = evaluateExpression(ce.args[i]);
                 if (evaluated.getName().equals("void")) {
-                    throw new TypeCheckFailure("Cannot pass void as an argument to a function or method");
+                    error("Cannot pass void as an argument to a function or method", expr);
                 }
                 argTypes[i] = evaluated;
             }
@@ -344,17 +358,16 @@ public final class Typechecker {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
                 if (ae.safeNavigation && !targetType.isNullable()) {
-                    // TODO: make this a warning somehow
-                    throw new TypeCheckFailure("Left-hand side of ?. must be nullable");
+                    warning("Left-hand side of ?. must be nullable", ae);
                 }
                 if (!ae.safeNavigation && targetType.isNullable()) {
-                    throw new TypeCheckFailure("Left-hand side of . cannot be nullable. Did you mean to use ?. ?");
+                    error("Left-hand side of . cannot be nullable. Did you mean to use ?. ?", ae);
                 }
                 if (targetType.getName().equals("void")) {
-                    throw new TypeCheckFailure("Cannot call method on void");
+                    error("Cannot call method on void", ce);
                 }
                 if (targetType == EvaluatedType.NULL) {
-                    throw new TypeCheckFailure("Cannot call methods on literal null");
+                    error("Cannot call methods on literal null", ce);
                 }
                 CtClass clazz = targetType.getJavassist();
                 method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
@@ -406,7 +419,7 @@ public final class Typechecker {
                 if (ce.target instanceof AccessExpression) {
                     AccessExpression ae = (AccessExpression)ce.target;
                     try {
-                        error.append(evaluateExpression(ae.target));
+                        error.append(getType(ae.target));
                     } catch (TypeCheckFailure e) {
                         error.append("UNKNOWN");
                     }
@@ -421,12 +434,14 @@ public final class Typechecker {
                     }
                     error.append(argTypes[i]);
                 }
-                throw new TypeCheckFailure(error.append(')').toString());
+                error(error.append(')').toString(), ce);
+                methodReturnType = EvaluatedType.NULL;
             }
             methodCalls.put(ce, method);
             if (methodReturnType == null) {
                 throw new TypeCheckFailure(
-                    "Forward reference (or self-reference) to a function with an inferred return type"
+                    "Forward reference (or self-reference) to a function with an inferred return type",
+                    ce
                 );
             }
             types.put(expr, methodReturnType);
@@ -437,7 +452,7 @@ public final class Typechecker {
                 LocalVariable variable = evaluateVariable(ie.identifier);
                 if (variable != null) {
                     if (!variable.isAssigned()) {
-                        throw new TypeCheckFailure("Variable " + variable.getName() + " accessed before it's assigned to");
+                        error("Variable " + variable.getName() + " accessed before it's assigned to", ie);
                     }
                     type = variable.getType();
                 }
@@ -447,8 +462,8 @@ public final class Typechecker {
                 if (variable != null) {
                     type = variable.getType();
                     if (type == null) {
-                        throw new TypeCheckFailure(
-                            "Forward reference to a global variable with an inferred type"
+                        error(
+                            "Forward reference to a global variable with an inferred type", ie
                         );
                     }
                 }
@@ -466,7 +481,8 @@ public final class Typechecker {
                 }
             }
             if (type == null) {
-                throw new TypeCheckFailure("Could not find variable " + ie.identifier);
+                error("Could not find variable " + ie.identifier, ie);
+                type = EvaluatedType.NULL;
             }
             types.put(expr, type);
         } else if (expr instanceof AssignmentExpression) {
@@ -477,9 +493,10 @@ public final class Typechecker {
                 LocalVariable local = evaluateVariable(identifierExpr.identifier);
                 if (local != null) {
                     if (!valueType.isAssignableTo(local.getType())) {
-                        throw new TypeCheckFailure(
+                        error(
                             "Cannot assign expression of type " + valueType +
-                            " to variable " + local.getName() + " of type " + local.getType()
+                            " to variable " + local.getName() + " of type " + local.getType(),
+                            assignExpr
                         );
                     }
                     local.setAssigned(true);
@@ -487,22 +504,23 @@ public final class Typechecker {
                     GlobalVariable global = definedGlobals.get(identifierExpr.identifier);
                     if (global != null) {
                         if (global.getType() == null) {
-                            throw new TypeCheckFailure(
-                                "Forward reference to a global variable with an inferred type"
+                            error(
+                                "Forward reference to a global variable with an inferred type", assignExpr
                             );
                         }
                         if (!valueType.isAssignableTo(global.getType())) {
-                            throw new TypeCheckFailure(
+                            error(
                                 "Cannot assign expression of type " + valueType +
-                                " to global variable " + global.getName() + " of type " + global.getType()
+                                " to global variable " + global.getName() + " of type " + global.getType(),
+                                assignExpr
                             );
                         }
                     } else {
-                        throw new TypeCheckFailure("Variable " + identifierExpr.identifier + " is not defined");
+                        error("Variable " + identifierExpr.identifier + " is not defined", identifierExpr);
                     }
                 }
             } else {
-                throw new TypeCheckFailure("Non-direct assignments not supported yet");
+                error("Non-direct assignments not supported yet", assignExpr);
             }
             types.put(expr, valueType);
         } else if (expr instanceof BinaryExpression) {
@@ -512,11 +530,12 @@ public final class Typechecker {
             switch (binExpr.type) {
                 case NULL_COALESCE: {
                     if (!leftType.isNullable()) {
-                        // TODO: make this a warning somehow
-                        throw new TypeCheckFailure("Left-hand-side of ?? must be nullable");
+                        warning("Left-hand-side of ?? isn't nullable", binExpr);
+                    } else if (leftType == EvaluatedType.NULL) {
+                        warning("Left-hand-side of ?? is literal null", binExpr);
                     }
                     if (rightType == EvaluatedType.NULL) {
-                        throw new TypeCheckFailure("Right-hand side of ?? cannot be literal null");
+                        error("Right-hand side of ?? cannot be literal null", binExpr);
                     }
                     EvaluatedType moreGeneral = rightType.isAssignableTo(leftType) ? leftType : rightType;
                     types.put(expr, moreGeneral.nullable(rightType.isNullable()));
@@ -545,6 +564,14 @@ public final class Typechecker {
             }
         }
         return null;
+    }
+
+    private void error(String message, ASTNode node) {
+        problemCollector.error(message, node.row, node.column);
+    }
+
+    private void warning(String message, ASTNode node) {
+        problemCollector.warning(message, node.row, node.column);
     }
 
     private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, EvaluatedType... argTypes) {
@@ -642,15 +669,15 @@ public final class Typechecker {
         return action.test(CT_JLO);
     }
 
-    static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr) {
+    static void verifyTypeAssignable(EvaluatedType assignTo, EvaluatedType expr, ProblemCollector problemCollector) {
         if (!expr.isAssignableTo(assignTo)) {
-            throw new TypeCheckFailure(expr + " not assignable to " + assignTo);
+            problemCollector.error(expr + " is not assignable to " + assignTo);
         }
     }
 
-    static void verifyTypeAssignable(String assignTo, CtClass expr) {
+    static void verifyTypeAssignable(String assignTo, CtClass expr, ProblemCollector problemCollector) {
         if (!checkTypeAssignable(assignTo, expr)) {
-            throw new TypeCheckFailure(expr.getName() + " not assignable to " + assignTo);
+            problemCollector.error(expr.getName() + " is not assignable to " + assignTo);
         }
     }
 
