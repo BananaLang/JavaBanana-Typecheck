@@ -1,14 +1,18 @@
 package io.github.bananalang.typecheck;
 
+import io.github.bananalang.parse.ast.VariableDeclarationStatement.Modifier;
 import javassist.CtClass;
 import javassist.CtMethod;
 import javassist.NotFoundException;
 
 public final class MethodCall {
+    public static final String EXTENSION_METHOD_ANNOTATION = "banana.internal.annotation.ExtensionMethod";
+
     private final ScriptMethod scriptMethod;
     private final CtMethod javaMethod;
     private EvaluatedType returnType = null;
     private EvaluatedType[] argTypes = null;
+    private Boolean isExtensionMethod = null;
 
     public MethodCall(ScriptMethod method) {
         scriptMethod = method;
@@ -18,6 +22,11 @@ public final class MethodCall {
     public MethodCall(CtMethod method) {
         scriptMethod = null;
         javaMethod = method;
+    }
+
+    MethodCall(CtMethod method, boolean isExtensionMethod) {
+        this(method);
+        this.isExtensionMethod = isExtensionMethod;
     }
 
     public ScriptMethod getScriptMethod() {
@@ -66,6 +75,17 @@ public final class MethodCall {
                 argTypes[i] = new EvaluatedType(ctArgTypes[i], nullableAnnotation[i]);
             }
             return argTypes;
+        }
+    }
+
+    public boolean isExtensionMethod() {
+        if (isExtensionMethod != null) {
+            return isExtensionMethod;
+        }
+        if (isScriptMethod()) {
+            return isExtensionMethod = scriptMethod.getModifiers().contains(Modifier.EXTENSION);
+        } else {
+            return isExtensionMethod = javaMethod.hasAnnotation(EXTENSION_METHOD_ANNOTATION);
         }
     }
 }

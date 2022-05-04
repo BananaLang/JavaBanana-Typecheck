@@ -602,10 +602,10 @@ public final class Typechecker {
                         false,
                         true,
                         mustBeExtension
-                            ? m -> m.hasAnnotation("banana.internal.annotation.ExtensionMethod")
+                            ? m -> m.hasAnnotation(MethodCall.EXTENSION_METHOD_ANNOTATION)
                             : null,
                         argTypes
-                    ));
+                    ), mustBeExtension ? Boolean.TRUE : null);
                 } catch (NotFoundException e) {
                     throw new TypeCheckFailure(e);
                 }
