@@ -288,7 +288,8 @@ public final class Typechecker {
                 ScriptMethod method = new ScriptMethod(
                     functionDef.name,
                     ifNotNull(functionDef.returnType, this::evaluateType),
-                    argTypes
+                    argTypes,
+                    functionDef.modifiers
                 );
                 methodDefinitions.put(functionDef, method);
                 definedMethods.computeIfAbsent(functionDef.name, k -> new ArrayList<>(1)).add(method);
@@ -375,69 +376,19 @@ public final class Typechecker {
                     error("Cannot call methods on literal null", ce);
                 }
                 CtClass clazz = targetType.getJavassist();
-                List<ScriptMethod> checkMethods = definedMethods.get(ae.name);
-                if (checkMethods != null) {
-                    searchDefinitionsLoop:
-                    for (ScriptMethod checkMethod : checkMethods) {
-                        EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
-                        if (checkArgTypes.length != argTypes.length + 1) continue;
-                        if (!checkTypeAssignable(checkArgTypes[0].getName(), targetType.getJavassist())) {
-                            continue;
-                        }
-                        for (int i = 1; i < checkArgTypes.length; i++) {
-                            if (argTypes[i - 1].isNullable() && !checkArgTypes[i].isNullable()) {
-                                continue searchDefinitionsLoop;
-                            }
-                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i - 1].getJavassist())) {
-                                continue searchDefinitionsLoop;
-                            }
-                        }
-                        method = new MethodCall(checkMethod);
-                        break;
-                    }
+                {
+                    EvaluatedType[] lookupTypes = new EvaluatedType[argTypes.length + 1];
+                    lookupTypes[0] = targetType;
+                    System.arraycopy(argTypes, 0, lookupTypes, 1, argTypes.length);
+                    method = lookupStaticMethod(ae.name, lookupTypes, true);
                 }
                 if (method == null) {
-                    method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
+                    method = new MethodCall(findMethod(clazz, ae.name, true, false, null, argTypes));
                 }
                 methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
-                List<ScriptMethod> checkMethods = definedMethods.get(ie.identifier);
-                if (checkMethods != null) {
-                    searchDefinitionsLoop:
-                    for (ScriptMethod checkMethod : checkMethods) {
-                        EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
-                        if (checkArgTypes.length != argTypes.length) continue;
-                        for (int i = 0; i < checkArgTypes.length; i++) {
-                            if (argTypes[i].isNullable() && !checkArgTypes[i].isNullable()) {
-                                continue searchDefinitionsLoop;
-                            }
-                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i].getJavassist())) {
-                                continue searchDefinitionsLoop;
-                            }
-                        }
-                        method = new MethodCall(checkMethod);
-                        break;
-                    }
-                }
-                if (method == null) {
-                    Imported<?> imported = imports.get(ie.identifier);
-                    if (imported != null && imported.getType() == ImportType.STATIC_METHOD) {
-                        @SuppressWarnings("unchecked")
-                        Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
-                        try {
-                            method = new MethodCall(findMethod(
-                                methodImport.getOwnedClass().getDeclaredMethods(ie.identifier),
-                                ie.identifier,
-                                false,
-                                true,
-                                argTypes
-                            ));
-                        } catch (NotFoundException e) {
-                            throw new TypeCheckFailure(e);
-                        }
-                    }
-                }
+                method = lookupStaticMethod(ie.identifier, argTypes, false);
                 if (method != null) {
                     methodReturnType = method.getReturnType();
                 }
@@ -618,13 +569,69 @@ public final class Typechecker {
         problemCollector.warning(message, node.row, node.column);
     }
 
-    private static CtMethod findMethod(CtMethod[] methods, String name, boolean checkName, boolean staticOnly, EvaluatedType... argTypes) {
+    private MethodCall lookupStaticMethod(String name, EvaluatedType[] argTypes, boolean mustBeExtension) {
+        List<ScriptMethod> checkMethods = definedMethods.get(name);
+        if (checkMethods != null) {
+            searchDefinitionsLoop:
+            for (ScriptMethod checkMethod : checkMethods) {
+                if (mustBeExtension && !checkMethod.getModifiers().contains(Modifier2.EXTENSION)) {
+                    continue;
+                }
+                EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
+                if (checkArgTypes.length != argTypes.length) continue;
+                for (int i = 0; i < checkArgTypes.length; i++) {
+                    if (argTypes[i].isNullable() && !checkArgTypes[i].isNullable()) {
+                        continue searchDefinitionsLoop;
+                    }
+                    if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i].getJavassist())) {
+                        continue searchDefinitionsLoop;
+                    }
+                }
+                return new MethodCall(checkMethod);
+            }
+        }
+        {
+            Imported<?> imported = imports.get(name);
+            if (imported != null && imported.getType() == ImportType.STATIC_METHOD) {
+                @SuppressWarnings("unchecked")
+                Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
+                try {
+                    return new MethodCall(findMethod(
+                        methodImport.getOwnedClass().getDeclaredMethods(name),
+                        name,
+                        false,
+                        true,
+                        mustBeExtension
+                            ? m -> m.hasAnnotation("banana.internal.annotation.ExtensionMethod")
+                            : null,
+                        argTypes
+                    ));
+                } catch (NotFoundException e) {
+                    throw new TypeCheckFailure(e);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static CtMethod findMethod(
+        CtMethod[] methods,
+        String name,
+        boolean checkName,
+        boolean staticOnly,
+        Predicate<CtMethod> check,
+        EvaluatedType... argTypes
+    ) {
+        if (check == null) {
+            check = x -> true;
+        }
         try {
             methodCheckLoop:
             for (CtMethod maybe : methods) {
                 if (checkName && !maybe.getName().equals(name)) continue;
                 if (!isAccessible(maybe)) continue;
                 if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
+                if (!check.test(maybe)) continue;
                 CtClass[] methodParamTypes = maybe.getParameterTypes();
                 boolean[] nullableParams = NullableLookup.nullableParams(maybe);
                 if (Modifier.isVarArgs(maybe.getModifiers())) {
@@ -674,8 +681,15 @@ public final class Typechecker {
         throw new TypeCheckFailure(error.toString());
     }
 
-    private static CtMethod findMethod(CtClass clazz, String name, boolean checkName, boolean staticOnly, EvaluatedType... argTypes) {
-        return findMethod(clazz.getMethods(), name, checkName, staticOnly, argTypes);
+    private static CtMethod findMethod(
+        CtClass clazz,
+        String name,
+        boolean checkName,
+        boolean staticOnly,
+        Predicate<CtMethod> check,
+        EvaluatedType... argTypes
+    ) {
+        return findMethod(clazz.getMethods(), name, checkName, staticOnly, check, argTypes);
     }
 
     private static boolean isAccessible(CtMethod method) {

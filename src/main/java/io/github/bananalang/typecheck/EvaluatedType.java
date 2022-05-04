@@ -47,6 +47,12 @@ public final class EvaluatedType {
     }
 
     public EvaluatedType nullable(boolean nullable) {
+        if (this == NULL) {
+            return this;
+        }
+        if (name.equals("void")) {
+            return this;
+        }
         if (nullable == this.nullable) {
             return this;
         }
