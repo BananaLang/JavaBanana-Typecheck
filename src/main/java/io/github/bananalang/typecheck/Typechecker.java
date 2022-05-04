@@ -67,6 +67,7 @@ public final class Typechecker {
     private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
     private final Deque<StatementList> scopeStack = new ArrayDeque<>();
     private final Map<ASTNode, MethodCall> methodCalls = new IdentityHashMap<>();
+    private final Map<ExpressionNode, CtField> fieldAccesses = new IdentityHashMap<>();
     private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
     private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
     private final Map<String, GlobalVariable> definedGlobals = new HashMap<>();
@@ -112,6 +113,10 @@ public final class Typechecker {
 
     public MethodCall getMethodCall(ASTNode node) {
         return methodCalls.get(node);
+    }
+
+    public CtField getFieldAccess(ExpressionNode expr) {
+        return fieldAccesses.get(expr);
     }
 
     public ScriptMethod getMethodDefinition(FunctionDefinitionStatement node) {
@@ -478,6 +483,7 @@ public final class Typechecker {
                     } catch (NotFoundException e) {
                         throw new TypeCheckFailure(e);
                     }
+                    fieldAccesses.put(ie, field);
                 }
             }
             if (type == null) {
