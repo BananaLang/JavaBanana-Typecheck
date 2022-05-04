@@ -26,7 +26,7 @@ import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
 import io.github.bananalang.parse.ast.IfOrWhileStatement;
 import io.github.bananalang.parse.ast.ImportStatement;
-import io.github.bananalang.parse.ast.NullExpression;
+import io.github.bananalang.parse.ast.ReservedIdentifierExpression;
 import io.github.bananalang.parse.ast.ReturnStatement;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
@@ -90,9 +90,9 @@ public final class Typechecker {
         if (JavaBananaConstants.DEBUG) {
             System.out.println("Beginning typecheck of 0x" + Integer.toHexString(root.hashCode()));
         }
-        evaluateImports(root);
-        evaluateGlobalsAndMethodHeaders(root);
         try {
+            evaluateImports(root);
+            evaluateGlobalsAndMethodHeaders(root);
             typecheck0(root);
         } catch (TypeCheckFailure e) {
             problemCollector.error(e.getMessage(), e.row, e.column);
@@ -375,7 +375,30 @@ public final class Typechecker {
                     error("Cannot call methods on literal null", ce);
                 }
                 CtClass clazz = targetType.getJavassist();
-                method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
+                List<ScriptMethod> checkMethods = definedMethods.get(ae.name);
+                if (checkMethods != null) {
+                    searchDefinitionsLoop:
+                    for (ScriptMethod checkMethod : checkMethods) {
+                        EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
+                        if (checkArgTypes.length != argTypes.length + 1) continue;
+                        if (!checkTypeAssignable(checkArgTypes[0].getName(), targetType.getJavassist())) {
+                            continue;
+                        }
+                        for (int i = 1; i < checkArgTypes.length; i++) {
+                            if (argTypes[i - 1].isNullable() && !checkArgTypes[i].isNullable()) {
+                                continue searchDefinitionsLoop;
+                            }
+                            if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i - 1].getJavassist())) {
+                                continue searchDefinitionsLoop;
+                            }
+                        }
+                        method = new MethodCall(checkMethod);
+                        break;
+                    }
+                }
+                if (method == null) {
+                    method = new MethodCall(findMethod(clazz, ae.name, true, false, argTypes));
+                }
                 methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
@@ -550,8 +573,23 @@ public final class Typechecker {
                 default:
                     throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet");
             }
-        } else if (expr instanceof NullExpression) {
-            types.put(expr, EvaluatedType.NULL);
+        } else if (expr instanceof ReservedIdentifierExpression) {
+            ReservedIdentifierExpression reservedExpr = (ReservedIdentifierExpression)expr;
+            switch (reservedExpr.identifier) {
+                case NULL:
+                    types.put(expr, EvaluatedType.NULL);
+                    break;
+                case THIS: {
+                    LocalVariable variable = evaluateVariable(null); // null name = this
+                    if (variable == null) {
+                        error("this not defined in this context", reservedExpr);
+                        types.put(expr, EvaluatedType.NULL);
+                        break;
+                    }
+                    types.put(expr, variable.getType());
+                    break;
+                }
+            }
         } else if (expr instanceof StringExpression) {
             types.put(expr, ET_JLS);
         } else {

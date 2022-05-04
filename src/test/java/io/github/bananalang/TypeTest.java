@@ -16,12 +16,12 @@ public class TypeTest {
 
         try {
             StatementList root = new Parser(
-                "def public var test() {\n" +
-                    "hello = null ?? \"\";\n" +
-                    "println(hello);\n" +
+                "def extension var echo(String) {\n" +
+                    "println(this);\n" +
                 "}\n" +
-                "def global String hello = \"Hello world!\";\n" +
-                "test();\n", problemCollector
+                "def var hello = \"Hello world!\";\n" +
+                "hello.echo();\n",
+                problemCollector
             ).parse();
 
             ClassPool cp = new ClassPool(ClassPool.getDefault());

@@ -27,7 +27,7 @@ public final class GlobalVariable {
         this.type = type;
     }
 
-    public Set<Modifier> getIndex() {
+    public Set<Modifier> getModifiers() {
         return modifiers;
     }
 }
