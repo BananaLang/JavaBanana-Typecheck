@@ -24,7 +24,7 @@ public final class MethodCall {
         javaMethod = method;
     }
 
-    MethodCall(CtMethod method, boolean isExtensionMethod) {
+    MethodCall(CtMethod method, Boolean isExtensionMethod) {
         this(method);
         this.isExtensionMethod = isExtensionMethod;
     }
