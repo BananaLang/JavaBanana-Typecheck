@@ -1,6 +1,7 @@
 package io.github.bananalang.typecheck;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -13,7 +14,32 @@ import javassist.CtMember;
 import javassist.CtMethod;
 import javassist.NotFoundException;
 
-public final class NullableLookup {
+public final class InformationLookup {
+    private static final class IdentityValuePair<K, V> {
+        final K key;
+        final V value;
+
+        IdentityValuePair(K key, V value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(key) ^ value.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof IdentityValuePair)) return false;
+            IdentityValuePair<?, ?> other = (IdentityValuePair<?, ?>)o;
+            return key == other.key && value.equals(other.value);
+        }
+    }
+
+    private static final boolean[] EMPTY_BOOLEAN_ARRAY = new boolean[0];
+
+    private static final Map<IdentityValuePair<CtMember, String>, Boolean> HAS_ANNOTATION_CACHE = new HashMap<>();
     private static final Map<CtMember, Boolean> NULLABLE_MEMBER_CACHE = new IdentityHashMap<>();
     private static final Map<CtBehavior, boolean[]> NULLABLE_PARAMS_CACHE = new IdentityHashMap<>();
 
@@ -25,16 +51,23 @@ public final class NullableLookup {
         }
     }
 
-    private NullableLookup() {
+    private InformationLookup() {
+    }
+
+    public static boolean hasAnnotation(CtMember member, String annotation) {
+        return HAS_ANNOTATION_CACHE.computeIfAbsent(
+            new IdentityValuePair<>(member, annotation),
+            k -> k.key.hasAnnotation(k.value)
+        );
     }
 
     private static Boolean isNullable0(Predicate<String> checkAnnotation) {
-        if (checkAnnotation.test("banana.internal.annotation.Nullable")) return true;
         if (checkAnnotation.test("banana.internal.annotation.NonNull")) return false;
-        if (checkAnnotation.test("org.jetbrains.annotations.Nullable")) return true;
+        if (checkAnnotation.test("banana.internal.annotation.Nullable")) return true;
         if (checkAnnotation.test("org.jetbrains.annotations.NotNull")) return false;
-        if (checkAnnotation.test("javax.annotation.Nullable")) return true;
+        if (checkAnnotation.test("org.jetbrains.annotations.Nullable")) return true;
         if (checkAnnotation.test("javax.annotation.NonNull")) return false;
+        if (checkAnnotation.test("javax.annotation.Nullable")) return true;
         return null;
     }
 
@@ -46,7 +79,7 @@ public final class NullableLookup {
             return false; // void isn't nullable
         }
         return NULLABLE_MEMBER_CACHE.computeIfAbsent(member, key -> {
-            Boolean result = isNullable0(key::hasAnnotation);
+            Boolean result = isNullable0(ann -> hasAnnotation(key, ann));
             if (result == null) {
                 String altMemberClassName = "banana.stubs." + key.getDeclaringClass().getName();
                 try {
@@ -61,7 +94,7 @@ public final class NullableLookup {
                     } else {
                         throw new AssertionError(key.getClass());
                     }
-                    result = isNullable0(altMember::hasAnnotation);
+                    result = isNullable0(ann -> hasAnnotation(altMember, ann));
                 } catch (NotFoundException e) {
                 }
             }
@@ -77,12 +110,24 @@ public final class NullableLookup {
             } catch (NotFoundException e) {
                 throw new TypeCheckFailure(e);
             }
+            if (paramTypes.length == 0) {
+                return EMPTY_BOOLEAN_ARRAY;
+            }
             boolean[] result = new boolean[paramTypes.length];
+            int primitiveCount = 0;
+            for (CtClass paramType : paramTypes) {
+                if (paramType.isPrimitive()) {
+                    primitiveCount++;
+                }
+            }
+            if (primitiveCount == paramTypes.length) {
+                // ALl primitive arguments!
+                return result;
+            }
             Object[][] annotations = key.getAvailableParameterAnnotations();
             int foundCount = 0;
             for (int i = 0; i < result.length; i++) {
                 if (paramTypes[i].isPrimitive()) {
-                    result[i] = false;
                     foundCount++;
                     continue;
                 }

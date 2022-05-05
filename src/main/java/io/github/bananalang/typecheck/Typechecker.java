@@ -453,7 +453,7 @@ public final class Typechecker {
                     @SuppressWarnings("unchecked")
                     CtField field = ((Imported<CtField>)imported).getObject();
                     try {
-                        type = new EvaluatedType(field.getType(), NullableLookup.isNullable(field));
+                        type = new EvaluatedType(field.getType(), InformationLookup.isNullable(field));
                     } catch (NotFoundException e) {
                         throw new TypeCheckFailure(e);
                     }
@@ -569,12 +569,12 @@ public final class Typechecker {
         problemCollector.warning(message, node.row, node.column);
     }
 
-    private MethodCall lookupStaticMethod(String name, EvaluatedType[] argTypes, boolean mustBeExtension) {
+    private MethodCall lookupStaticMethod(String name, EvaluatedType[] argTypes, boolean isExtension) {
         List<ScriptMethod> checkMethods = definedMethods.get(name);
         if (checkMethods != null) {
             searchDefinitionsLoop:
             for (ScriptMethod checkMethod : checkMethods) {
-                if (mustBeExtension && !checkMethod.getModifiers().contains(Modifier2.EXTENSION)) {
+                if (isExtension != checkMethod.getModifiers().contains(Modifier2.EXTENSION)) {
                     continue;
                 }
                 EvaluatedType[] checkArgTypes = checkMethod.getArgTypes();
@@ -601,11 +601,11 @@ public final class Typechecker {
                         name,
                         false,
                         true,
-                        mustBeExtension
-                            ? m -> m.hasAnnotation(MethodCall.EXTENSION_METHOD_ANNOTATION)
-                            : null,
+                        isExtension
+                            ? m -> InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION)
+                            : m -> !InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION),
                         argTypes
-                    ), mustBeExtension ? Boolean.TRUE : null);
+                    ), isExtension);
                 } catch (NotFoundException e) {
                     throw new TypeCheckFailure(e);
                 }
@@ -633,7 +633,7 @@ public final class Typechecker {
                 if (staticOnly && !Modifier.isStatic(maybe.getModifiers())) continue;
                 if (!check.test(maybe)) continue;
                 CtClass[] methodParamTypes = maybe.getParameterTypes();
-                boolean[] nullableParams = NullableLookup.nullableParams(maybe);
+                boolean[] nullableParams = InformationLookup.nullableParams(maybe);
                 if (Modifier.isVarArgs(maybe.getModifiers())) {
                     if (argTypes.length < methodParamTypes.length - 1) continue;
                     for (int i = 0; i < methodParamTypes.length - 1; i++) {
