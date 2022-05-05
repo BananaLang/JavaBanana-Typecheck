@@ -351,6 +351,7 @@ public final class Typechecker {
     }
 
     private EvaluatedType evaluateExpression(ExpressionNode expr) {
+        EvaluatedType resultType;
         if (expr instanceof CallExpression) {
             CallExpression ce = (CallExpression)expr;
             EvaluatedType[] argTypes = new EvaluatedType[ce.args.length];
@@ -426,7 +427,7 @@ public final class Typechecker {
                     ce
                 );
             }
-            types.put(expr, methodReturnType);
+            resultType = methodReturnType;
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
             EvaluatedType type = null;
@@ -467,7 +468,7 @@ public final class Typechecker {
                 error("Could not find variable " + ie.identifier, ie);
                 type = EvaluatedType.NULL;
             }
-            types.put(expr, type);
+            resultType = type;
         } else if (expr instanceof AssignmentExpression) {
             AssignmentExpression assignExpr = (AssignmentExpression)expr;
             EvaluatedType valueType = evaluateExpression(assignExpr.value);
@@ -505,7 +506,7 @@ public final class Typechecker {
             } else {
                 error("Non-direct assignments not supported yet", assignExpr);
             }
-            types.put(expr, valueType);
+            resultType = valueType;
         } else if (expr instanceof BinaryExpression) {
             BinaryExpression binExpr = (BinaryExpression)expr;
             EvaluatedType leftType = evaluateExpression(binExpr.left);
@@ -521,7 +522,7 @@ public final class Typechecker {
                         error("Right-hand side of ?? cannot be literal null", binExpr);
                     }
                     EvaluatedType moreGeneral = rightType.isAssignableTo(leftType) ? leftType : rightType;
-                    types.put(expr, moreGeneral.nullable(rightType.isNullable()));
+                    resultType = moreGeneral.nullable(rightType.isNullable());
                     break;
                 }
                 default:
@@ -531,25 +532,28 @@ public final class Typechecker {
             ReservedIdentifierExpression reservedExpr = (ReservedIdentifierExpression)expr;
             switch (reservedExpr.identifier) {
                 case NULL:
-                    types.put(expr, EvaluatedType.NULL);
+                    resultType = EvaluatedType.NULL;
                     break;
                 case THIS: {
                     LocalVariable variable = evaluateVariable(null); // null name = this
                     if (variable == null) {
                         error("this not defined in this context", reservedExpr);
-                        types.put(expr, EvaluatedType.NULL);
+                        resultType = EvaluatedType.NULL;
                         break;
                     }
-                    types.put(expr, variable.getType());
+                    resultType = variable.getType();
                     break;
                 }
+                default:
+                    throw new AssertionError();
             }
         } else if (expr instanceof StringExpression) {
-            types.put(expr, ET_JLS);
+            resultType = ET_JLS;
         } else {
             throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
         }
-        return getType(expr);
+        types.put(expr, resultType);
+        return resultType;
     }
 
     private LocalVariable evaluateVariable(String name) {
