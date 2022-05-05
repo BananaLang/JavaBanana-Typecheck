@@ -64,14 +64,15 @@ public final class Typechecker {
     private final ProblemCollector problemCollector;
     private final Map<ASTNode, EvaluatedType> types = new IdentityHashMap<>();
     private final Map<String, Imported<?>> imports = new HashMap<>();
-    private final Map<StatementList, Map<String, LocalVariable>> scopes = new IdentityHashMap<>();
-    private final Deque<StatementList> scopeStack = new ArrayDeque<>();
+    private final Map<StatementList, TypecheckerScope> scopes = new IdentityHashMap<>();
+    private final Deque<TypecheckerScope> scopeStack = new ArrayDeque<>();
     private final Map<ASTNode, MethodCall> methodCalls = new IdentityHashMap<>();
     private final Map<ExpressionNode, CtField> fieldAccesses = new IdentityHashMap<>();
     private final Map<FunctionDefinitionStatement, ScriptMethod> methodDefinitions = new IdentityHashMap<>();
     private final Map<String, List<ScriptMethod>> definedMethods = new HashMap<>();
     private final Map<String, GlobalVariable> definedGlobals = new HashMap<>();
     private EvaluatedType returnType = ET_VOID;
+    private boolean scopeIsRoot = true;
     private final List<EvaluatedType> potentialReturns = new ArrayList<>();
     private final List<LocalVariable> functionArgs = new ArrayList<>();
     private Map<String, LocalVariable> currentScope = null;
@@ -107,7 +108,7 @@ public final class Typechecker {
         return types.get(node);
     }
 
-    public Map<String, LocalVariable> getScope(StatementList owner) {
+    public TypecheckerScope getScope(StatementList owner) {
         return scopes.get(owner);
     }
 
@@ -130,8 +131,11 @@ public final class Typechecker {
     private void typecheck0(ASTNode root) {
         if (root instanceof StatementList) {
             StatementList sl = (StatementList)root;
-            scopeStack.addLast(sl);
-            scopes.put(sl, currentScope = new HashMap<>());
+            TypecheckerScope newScope = new TypecheckerScope(sl, scopeIsRoot);
+            scopeIsRoot = false;
+            scopeStack.addLast(newScope);
+            scopes.put(sl, newScope);
+            currentScope = newScope.getVars();
             if (!functionArgs.isEmpty()) {
                 for (LocalVariable arg : functionArgs) {
                     currentScope.put(arg.getName(), arg);
@@ -142,7 +146,7 @@ public final class Typechecker {
                 typecheck0(stmt);
             }
             scopeStack.removeLast();
-            currentScope = scopeStack.isEmpty() ? null : scopes.get(scopeStack.peekLast());
+            currentScope = scopeStack.isEmpty() ? null : scopeStack.peekLast().getVars();
         } else if (root instanceof ExpressionStatement) {
             ExpressionStatement es = (ExpressionStatement)root;
             evaluateExpression(es.expression);
@@ -197,6 +201,7 @@ public final class Typechecker {
             for (int i = 0; i < functionDef.args.length; i++) {
                 functionArgs.add(new LocalVariable(functionDef.args[i].name, method.getArgTypes()[i], functionArgs.size(), true));
             }
+            scopeIsRoot = true;
             typecheck0(functionDef.body);
             if (returnType == null) {
                 if (potentialReturns.isEmpty()) {
@@ -299,11 +304,13 @@ public final class Typechecker {
                     continue;
                 }
                 for (VariableDeclaration decl : varDef.declarations) {
-                    definedGlobals.put(decl.name, new GlobalVariable(
+                    if (definedGlobals.put(decl.name, new GlobalVariable(
                         decl.name,
                         ifNotNull(decl.type, t -> evaluateType(t).nullable(true)),
                         varDef.modifiers
-                    ));
+                    )) != null) {
+                        error("Duplicate global variable " + decl.name, varDef);
+                    }
                 }
             }
         }
@@ -546,15 +553,16 @@ public final class Typechecker {
     }
 
     private LocalVariable evaluateVariable(String name) {
-        Iterator<StatementList> scopeIterator = scopeStack.descendingIterator();
+        Iterator<TypecheckerScope> scopeIterator = scopeStack.descendingIterator();
         while (scopeIterator.hasNext()) {
-            Map<String, LocalVariable> scope = scopes.get(scopeIterator.next());
-            LocalVariable variable = scope.get(name);
+            TypecheckerScope scope = scopeIterator.next();
+            LocalVariable variable = scope.getVars().get(name);
             if (variable != null) {
                 return variable;
             }
+            if (scope.isRoot()) return null;
         }
-        return null;
+        throw new AssertionError("Scope fallthrough");
     }
 
     private void error(String message, ASTNode node) {
