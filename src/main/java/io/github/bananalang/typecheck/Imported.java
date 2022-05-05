@@ -1,6 +1,5 @@
 package io.github.bananalang.typecheck;
 
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -14,6 +13,7 @@ import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtField;
 import javassist.CtMethod;
+import javassist.Modifier;
 import javassist.NotFoundException;
 
 public class Imported<T> {
@@ -43,7 +43,7 @@ public class Imported<T> {
         try {
             return class_(cp.get(name));
         } catch (NotFoundException e) {
-            throw new IllegalArgumentException(e);
+            throw new TypeCheckFailure(e);
         }
     }
 
@@ -55,6 +55,20 @@ public class Imported<T> {
                 for (Class<?> exportedClass : moduleDesc.exportedClasses()) {
                     imports.add(class_(clazz.getClassPool(), exportedClass.getName()));
                 }
+                for (String publicImport : moduleDesc.publicImports()) {
+                    int dotIndex = publicImport.indexOf('.');
+                    if (dotIndex == -1) {
+                        throw new TypeCheckFailure(
+                            "Error importing module " + clazz.getName() +
+                            ": Public import " + publicImport + " missing dot"
+                        );
+                    }
+                    imports.addAll(infer(
+                        clazz.getClassPool(),
+                        publicImport.substring(0, dotIndex),
+                        publicImport.substring(dotIndex + 1)
+                    ));
+                }
             }
         } catch (ClassNotFoundException e) {
         }
@@ -63,10 +77,10 @@ public class Imported<T> {
                 imports.add(new Imported<>(clazz, field, field.getName(), ImportType.STATIC_FIELD));
             }
         }
-        Set<String> foundFields = new HashSet<>();
+        Set<String> foundMethods = new HashSet<>();
         for (CtMethod method : clazz.getDeclaredMethods()) {
             if (Modifier.isPublic(method.getModifiers()) && Modifier.isStatic(method.getModifiers())) {
-                if (foundFields.add(method.getName())) {
+                if (foundMethods.add(method.getName())) {
                     imports.add(new Imported<>(clazz, method, method.getName(), ImportType.STATIC_METHOD));
                 }
             }
@@ -78,7 +92,7 @@ public class Imported<T> {
         try {
             return starImport(cp.get(name));
         } catch (NotFoundException e) {
-            throw new IllegalArgumentException(e);
+            throw new TypeCheckFailure(e);
         }
     }
 
@@ -86,14 +100,11 @@ public class Imported<T> {
         module = module.replace('/', '.');
         String moduleClassName = BananaUtils.moduleToClassName(module);
         CtClass clazz = cp.getOrNull(moduleClassName);
-        if (name.equals("*")) {
-            if (clazz != null) {
-                return starImport(clazz);
-            }
-            throw new IllegalArgumentException("Importing all members from a package not supported at this time.");
-        }
         // 1. Check if it's an exported member of a module
         if (clazz != null) {
+            if (name.equals("*")) {
+                return starImport(clazz);
+            }
             try {
                 BananaModule moduleDesc = (BananaModule)clazz.getAnnotation(BananaModule.class);
                 if (moduleDesc != null) {
@@ -115,13 +126,18 @@ public class Imported<T> {
             }
         }
         // 2. Check if it's a class in a package
-        clazz = cp.getOrNull(module + '.' + name);
-        if (clazz != null) {
-            return Collections.singleton(class_(clazz));
+        if (!name.equals("*")) {
+            clazz = cp.getOrNull(module + '.' + name);
+            if (clazz != null) {
+                return Collections.singleton(class_(clazz));
+            }
         }
         // 3. Check if it's a public static member in a class
         clazz = cp.getOrNull(module);
         if (clazz != null) {
+            if (name.equals("*")) {
+                return starImport(clazz);
+            }
             try {
                 return Collections.singleton(new Imported<>(clazz, clazz.getDeclaredMethod(name), name, ImportType.STATIC_METHOD));
             } catch (NotFoundException e) {
@@ -131,7 +147,7 @@ public class Imported<T> {
             } catch (NotFoundException e) {
             }
         }
-        throw new IllegalArgumentException("Could not find import " + module + '.' + name);
+        throw new TypeCheckFailure("Could not find import " + module + '.' + name);
     }
 
     public CtClass getOwnedClass() {

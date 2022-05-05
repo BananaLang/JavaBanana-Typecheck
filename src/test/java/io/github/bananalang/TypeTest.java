@@ -19,8 +19,11 @@ public class TypeTest {
                 "def extension var echo(String) {\n" +
                     "println(this);\n" +
                 "}\n" +
-                "def var hello = \"Hello world!\";\n" +
-                "hello.echo();\n",
+                "def extension var echo2(String, String? other) {\n" +
+                    "this.add(other).echo();\n" +
+                "}\n" +
+                "def var hello = \"Hello \";\n" +
+                "hello.echo2(\"world!\");\n",
                 problemCollector
             ).parse();
 

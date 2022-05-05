@@ -323,11 +323,7 @@ public final class Typechecker {
         addImport(Imported.class_(cp, "java.lang.Class"));
         addImport(Imported.class_(CT_JLO));
         addImport(Imported.class_(CT_JLS));
-        try {
-            addImports(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
-        } catch (TypeCheckFailure e) {
-            // No stdlib installed
-        }
+        addImports(Imported.starImport(cp, "banana.builtin.ModuleBuiltin"));
         for (StatementNode stmt : root.children) {
             if (!(stmt instanceof ImportStatement)) {
                 continue;
@@ -364,7 +360,7 @@ public final class Typechecker {
                 AccessExpression ae = (AccessExpression)ce.target;
                 EvaluatedType targetType = evaluateExpression(ae.target);
                 if (ae.safeNavigation && !targetType.isNullable()) {
-                    warning("Left-hand side of ?. must be nullable", ae);
+                    warning("Left-hand side of ?. isn't nullable", ae);
                 }
                 if (!ae.safeNavigation && targetType.isNullable()) {
                     error("Left-hand side of . cannot be nullable. Did you mean to use ?. ?", ae);
