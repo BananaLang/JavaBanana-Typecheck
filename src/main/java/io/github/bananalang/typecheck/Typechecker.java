@@ -179,12 +179,12 @@ public final class Typechecker {
                     } else {
                         verifyTypeAssignable(declTypes[i] = evaluateType(decl.type), exprType, problemCollector);
                     }
-                } else if (!isGlobalDecl) {
+                } else if (global == null) {
                     declTypes[i] = evaluateType(decl.type);
                 } else if (isLazyDecl) {
                     error("Lazy variables must be initialized", vds);
                 }
-                if (isGlobalDecl) {
+                if (global != null) {
                     if (global.getType() == null) {
                         EvaluatedType globalType = declTypes[i];
                         if (!isLazyDecl) {

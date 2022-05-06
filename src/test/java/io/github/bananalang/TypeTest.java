@@ -19,6 +19,7 @@ public class TypeTest {
                 "def lazy var myVar = myExpensiveFunc();\n" +
                 "println(\"created variable\");\n" +
                 "def String myExpensiveFunc() {\n" +
+                    "def global var myThing = \"\";\n" +
                     "println(\"initialized\");\n" +
                     "return \"hello\";\n" +
                 "}\n" +
