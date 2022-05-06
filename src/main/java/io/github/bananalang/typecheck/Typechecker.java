@@ -154,6 +154,7 @@ public final class Typechecker {
             VariableDeclarationStatement vds = (VariableDeclarationStatement)root;
             EvaluatedType[] declTypes = new EvaluatedType[vds.declarations.length];
             boolean isGlobalDecl = vds.isGlobalVariableDef();
+            boolean isLazyDecl = isGlobalDecl && vds.modifiers.contains(Modifier2.LAZY);
             for (int i = 0; i < vds.declarations.length; i++) {
                 VariableDeclaration decl = vds.declarations[i];
                 if (!isGlobalDecl && currentScope.containsKey(decl.name)) {
@@ -180,10 +181,16 @@ public final class Typechecker {
                     }
                 } else if (!isGlobalDecl) {
                     declTypes[i] = evaluateType(decl.type);
+                } else if (isLazyDecl) {
+                    error("Lazy variables must be initialized", vds);
                 }
                 if (isGlobalDecl) {
                     if (global.getType() == null) {
-                        global.setType(declTypes[i].nullable(true));
+                        EvaluatedType globalType = declTypes[i];
+                        if (!isLazyDecl) {
+                            globalType = globalType.nullable(true);
+                        }
+                        global.setType(globalType);
                     }
                 } else {
                     currentScope.put(decl.name, new LocalVariable(
@@ -421,12 +428,6 @@ public final class Typechecker {
                 methodReturnType = EvaluatedType.NULL;
             }
             methodCalls.put(ce, method);
-            if (methodReturnType == null) {
-                throw new TypeCheckFailure(
-                    "Forward reference (or self-reference) to a function with an inferred return type",
-                    ce
-                );
-            }
             resultType = methodReturnType;
         } else if (expr instanceof IdentifierExpression) {
             IdentifierExpression ie = (IdentifierExpression)expr;
@@ -498,6 +499,9 @@ public final class Typechecker {
                                 " to global variable " + global.getName() + " of type " + global.getType(),
                                 assignExpr
                             );
+                        }
+                        if (global.getModifiers().contains(Modifier2.LAZY)) {
+                            error("Cannot assign to lazy variable", assignExpr);
                         }
                     } else {
                         error("Variable " + identifierExpr.identifier + " is not defined", identifierExpr);
@@ -594,6 +598,12 @@ public final class Typechecker {
                     if (!checkTypeAssignable(checkArgTypes[i].getName(), argTypes[i].getJavassist())) {
                         continue searchDefinitionsLoop;
                     }
+                }
+                if (checkMethod.getReturnType() == null) {
+                    throw new TypeCheckFailure(
+                        "Forward reference (or self-reference) to a function (" +
+                        name + ") with an inferred return type"
+                    );
                 }
                 return new MethodCall(checkMethod);
             }
