@@ -1,8 +1,8 @@
 package io.github.bananalang.typecheck;
 
-import io.github.bananalang.parse.ast.VariableDeclarationStatement.Modifier;
 import javassist.CtClass;
 import javassist.CtMethod;
+import javassist.Modifier;
 import javassist.NotFoundException;
 
 public final class MethodCall {
@@ -13,6 +13,7 @@ public final class MethodCall {
     private EvaluatedType returnType = null;
     private EvaluatedType[] argTypes = null;
     private Boolean isExtensionMethod = null;
+    private Boolean isStaticInvocation = null;
 
     public MethodCall(ScriptMethod method) {
         scriptMethod = method;
@@ -83,9 +84,20 @@ public final class MethodCall {
             return isExtensionMethod;
         }
         if (isScriptMethod()) {
-            return isExtensionMethod = scriptMethod.getModifiers().contains(Modifier.EXTENSION);
+            return isExtensionMethod = scriptMethod.getModifiers().contains(Modifier2.EXTENSION);
         } else {
             return isExtensionMethod = javaMethod.hasAnnotation(EXTENSION_METHOD_ANNOTATION);
+        }
+    }
+
+    public boolean isStaticInvocation() {
+        if (isStaticInvocation != null) {
+            return isStaticInvocation;
+        }
+        if (isScriptMethod()) {
+            return isStaticInvocation = Boolean.TRUE;
+        } else {
+            return isStaticInvocation = Modifier.isStatic(javaMethod.getModifiers());
         }
     }
 }
