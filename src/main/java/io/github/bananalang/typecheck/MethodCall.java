@@ -79,6 +79,20 @@ public final class MethodCall {
         }
     }
 
+    public String getDescriptor() {
+        if (isScriptMethod()) {
+            StringBuilder descriptorBuilder = new StringBuilder("(");
+            for (EvaluatedType argType : scriptMethod.getArgTypes()) {
+                descriptorBuilder.append(argType.getDescriptor());
+            }
+            return descriptorBuilder.append(')')
+                .append(scriptMethod.getReturnType().getDescriptor())
+                .toString();
+        } else {
+            return javaMethod.getSignature();
+        }
+    }
+
     public boolean isExtensionMethod() {
         if (isExtensionMethod != null) {
             return isExtensionMethod;
