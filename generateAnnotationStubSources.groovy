@@ -27,7 +27,7 @@ Executors.newFixedThreadPool(threadCount).with {
         execute {
             log.info "Processing $annotationPackage"
 
-            def packageName = jdkAnnotationsDir.relativize(annotationPackage).toString().replaceAll(File.separator, '.')
+            def packageName = jdkAnnotationsDir.relativize(annotationPackage).toString().replace(File.separator, '.')
             packageName = packageName.substring(0, packageName.length() - 16)
             if (packageName.startsWith('com.sun.jdi')) return
 
