@@ -44,7 +44,10 @@ import javassist.Modifier;
 import javassist.NotFoundException;
 
 public final class Typechecker {
-    private static final Map<Map.Entry<String, String>, Boolean> cachedAssignableLookups = new HashMap<>();
+    private static final Map<Map.Entry<String, String>, Boolean> CACHED_ASSIGNABLE_LOOKUPS = new HashMap<>();
+    private static final Predicate<CtMethod> CHECK_IS_EXTENSION =
+        m -> InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION);
+    private static final Predicate<CtMethod> CHECK_IS_NOT_EXTENSION = CHECK_IS_EXTENSION.negate();
     static final CtClass CT_JLO, CT_JLS;
     private static final EvaluatedType ET_JLS, ET_VOID;
 
@@ -373,22 +376,45 @@ public final class Typechecker {
             EvaluatedType methodReturnType = null;
             if (ce.target instanceof AccessExpression) {
                 AccessExpression ae = (AccessExpression)ce.target;
-                EvaluatedType targetType = evaluateExpression(ae.target);
-                if (ae.safeNavigation && !targetType.isNullable()) {
-                    warning("Left-hand side of ?. isn't nullable", ae);
+                if (ae.target instanceof IdentifierExpression) {
+                    IdentifierExpression identExpr = (IdentifierExpression)ae.target;
+                    Imported<?> imported = imports.get(identExpr.identifier);
+                    if (imported != null && imported.getType() == ImportType.CLASS) {
+                        @SuppressWarnings("unchecked")
+                        CtClass clazz = ((Imported<CtClass>)imported).getObject();
+                        CtMethod foundMethod = findMethod(
+                            clazz,
+                            ae.name,
+                            true,
+                            true,
+                            CHECK_IS_NOT_EXTENSION,
+                            true,
+                            argTypes
+                        );
+                        if (foundMethod != null) {
+                            method = new MethodCall(foundMethod, false);
+                            methodReturnType = method.getReturnType();
+                        }
+                    }
                 }
-                if (!ae.safeNavigation && targetType.isNullable()) {
-                    error("Left-hand side of . cannot be nullable. Did you mean to use ?. instead?", ae);
-                }
-                if (targetType.getName().equals("void")) {
-                    error("Cannot call method on void", ce);
-                }
-                if (targetType == EvaluatedType.NULL) {
-                    error("Cannot call methods on literal null", ce);
-                    methodReturnType = EvaluatedType.NULL;
-                } else {
-                    method = lookupObjectMethod(targetType, ae.name, argTypes);
-                    methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
+                if (method == null) {
+                    EvaluatedType targetType = evaluateExpression(ae.target);
+                    if (ae.safeNavigation && !targetType.isNullable()) {
+                        warning("Left-hand side of ?. isn't nullable", ae);
+                    }
+                    if (!ae.safeNavigation && targetType.isNullable()) {
+                        error("Left-hand side of . cannot be nullable. Did you mean to use ?. instead?", ae);
+                    }
+                    if (targetType.getName().equals("void")) {
+                        error("Cannot call method on void", ce);
+                    }
+                    if (targetType == EvaluatedType.NULL) {
+                        error("Cannot call methods on literal null", ce);
+                        methodReturnType = EvaluatedType.NULL;
+                    } else {
+                        method = lookupObjectMethod(targetType, ae.name, argTypes);
+                        methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
+                    }
                 }
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
@@ -619,7 +645,7 @@ public final class Typechecker {
             method = lookupStaticMethod(name, lookupTypes, true);
         }
         if (method == null) {
-            method = new MethodCall(findMethod(clazz, name, true, false, null, argTypes));
+            method = new MethodCall(findMethod(clazz, name, true, false, null, false, argTypes));
         }
         return method;
     }
@@ -662,9 +688,8 @@ public final class Typechecker {
                         name,
                         false,
                         true,
-                        isExtension
-                            ? m -> InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION)
-                            : m -> !InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION),
+                        isExtension ? CHECK_IS_EXTENSION : CHECK_IS_NOT_EXTENSION,
+                        false,
                         argTypes
                     ), isExtension);
                 } catch (NotFoundException e) {
@@ -681,6 +706,7 @@ public final class Typechecker {
         boolean checkName,
         boolean staticOnly,
         Predicate<CtMethod> check,
+        boolean returnNull,
         EvaluatedType... argTypes
     ) {
         if (check == null) {
@@ -748,9 +774,10 @@ public final class Typechecker {
         boolean checkName,
         boolean staticOnly,
         Predicate<CtMethod> check,
+        boolean returnNull,
         EvaluatedType... argTypes
     ) {
-        return findMethod(clazz.getMethods(), name, checkName, staticOnly, check, argTypes);
+        return findMethod(clazz.getMethods(), name, checkName, staticOnly, check, returnNull, argTypes);
     }
 
     private static boolean isAccessible(CtMethod method) {
@@ -808,7 +835,7 @@ public final class Typechecker {
         if (assignTo.equals(expr.getName())) {
             return true; // Fast path
         }
-        return cachedAssignableLookups.computeIfAbsent(new SimpleImmutableEntry<>(assignTo, expr.getName()), k ->
+        return CACHED_ASSIGNABLE_LOOKUPS.computeIfAbsent(new SimpleImmutableEntry<>(assignTo, expr.getName()), k ->
             forEachSuperclass(expr, clazz -> clazz.getName().equals(assignTo))
         );
     }
