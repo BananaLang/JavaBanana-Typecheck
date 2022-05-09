@@ -635,6 +635,10 @@ public final class Typechecker {
         problemCollector.warning(message, node.row, node.column);
     }
 
+    private void warning(String message) {
+        problemCollector.warning(message);
+    }
+
     private MethodCall lookupObjectMethod(EvaluatedType targetType, String name, EvaluatedType... argTypes) {
         MethodCall method;
         CtClass clazz = targetType.getJavassist();
@@ -646,6 +650,9 @@ public final class Typechecker {
         }
         if (method == null) {
             method = new MethodCall(findMethod(clazz, name, true, false, null, false, argTypes));
+            if (method.isStaticInvocation()) {
+                warning("Calling a static method on an instance");
+            }
         }
         return method;
     }
