@@ -378,16 +378,18 @@ public final class Typechecker {
                     warning("Left-hand side of ?. isn't nullable", ae);
                 }
                 if (!ae.safeNavigation && targetType.isNullable()) {
-                    error("Left-hand side of . cannot be nullable. Did you mean to use ?. ?", ae);
+                    error("Left-hand side of . cannot be nullable. Did you mean to use ?. instead?", ae);
                 }
                 if (targetType.getName().equals("void")) {
                     error("Cannot call method on void", ce);
                 }
                 if (targetType == EvaluatedType.NULL) {
                     error("Cannot call methods on literal null", ce);
+                    methodReturnType = EvaluatedType.NULL;
+                } else {
+                    method = lookupObjectMethod(targetType, ae.name, argTypes);
+                    methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
                 }
-                method = lookupObjectMethod(targetType, ae.name, argTypes);
-                methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
                 method = lookupStaticMethod(ie.identifier, argTypes, false);

@@ -16,7 +16,9 @@ public class TypeTest {
 
         try {
             StatementList root = new Parser(
-                "println(\"Hello \" + \"world!\");\n",
+                "import java.util.Arrays;\n" +
+                "def var testList = Arrays.asList(\"Hello,\", \"World!\", \"Banana\");\n" +
+                "println(testList);\n",
                 problemCollector
             ).parse();
 
