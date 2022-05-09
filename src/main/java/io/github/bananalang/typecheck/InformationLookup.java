@@ -137,7 +137,9 @@ public final class InformationLookup {
                 }
                 Boolean isParamNullable = isNullable0(ann -> {
                     for (String check : annotationNames) {
-                        return check.equals(ann);
+                        if (check.equals(ann)) {
+                            return true;
+                        }
                     }
                     return false;
                 });

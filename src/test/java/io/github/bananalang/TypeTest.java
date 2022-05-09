@@ -16,14 +16,7 @@ public class TypeTest {
 
         try {
             StatementList root = new Parser(
-                "def lazy var myVar = myExpensiveFunc();\n" +
-                "println(\"created variable\");\n" +
-                "def String myExpensiveFunc() {\n" +
-                    "def global var myThing = \"\";\n" +
-                    "println(\"initialized\");\n" +
-                    "return \"hello\";\n" +
-                "}\n" +
-                "println(myVar);\n",
+                "println(\"Hello \" + \"world!\");\n",
                 problemCollector
             ).parse();
 

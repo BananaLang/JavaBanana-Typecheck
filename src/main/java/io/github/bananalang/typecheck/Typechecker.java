@@ -386,16 +386,7 @@ public final class Typechecker {
                 if (targetType == EvaluatedType.NULL) {
                     error("Cannot call methods on literal null", ce);
                 }
-                CtClass clazz = targetType.getJavassist();
-                {
-                    EvaluatedType[] lookupTypes = new EvaluatedType[argTypes.length + 1];
-                    lookupTypes[0] = targetType;
-                    System.arraycopy(argTypes, 0, lookupTypes, 1, argTypes.length);
-                    method = lookupStaticMethod(ae.name, lookupTypes, true);
-                }
-                if (method == null) {
-                    method = new MethodCall(findMethod(clazz, ae.name, true, false, null, argTypes));
-                }
+                method = lookupObjectMethod(targetType, ae.name, argTypes);
                 methodReturnType = method.getReturnType().nullable(ae.safeNavigation || method.getReturnType().isNullable());
             } else if (ce.target instanceof IdentifierExpression) {
                 IdentifierExpression ie = (IdentifierExpression)ce.target;
@@ -515,6 +506,8 @@ public final class Typechecker {
             BinaryExpression binExpr = (BinaryExpression)expr;
             EvaluatedType leftType = evaluateExpression(binExpr.left);
             EvaluatedType rightType = evaluateExpression(binExpr.right);
+            String operatorOverloadingMethod = null;
+            resultType = null;
             switch (binExpr.type) {
                 case NULL_COALESCE: {
                     if (!leftType.isNullable()) {
@@ -529,8 +522,41 @@ public final class Typechecker {
                     resultType = moreGeneral.nullable(rightType.isNullable());
                     break;
                 }
+                case BITWISE_OR: operatorOverloadingMethod = "or"; break;
+                case BITWISE_XOR: operatorOverloadingMethod = "xor"; break;
+                case BITWISE_AND: operatorOverloadingMethod = "and"; break;
+                case LEFT_SHIFT: operatorOverloadingMethod = "shiftLeft"; break;
+                case RIGHT_SHIFT: operatorOverloadingMethod = "shiftRight"; break;
+                case ADD: operatorOverloadingMethod = "add"; break;
+                case SUBTRACT: operatorOverloadingMethod = "subtract"; break;
+                case MULTIPLY: operatorOverloadingMethod = "multiply"; break;
+                case DIVIDE: operatorOverloadingMethod = "divide"; break;
+                case MODULUS: operatorOverloadingMethod = "remainder"; break;
                 default:
                     throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet");
+            }
+            if (operatorOverloadingMethod != null) {
+                if (leftType.isNullable()) {
+                    error("Left-hand side of " + binExpr.type + " cannot be nullable", binExpr.left);
+                }
+                if (rightType.isNullable()) {
+                    error("Right-hand side of " + binExpr.type + " cannot be nullable", binExpr.right);
+                }
+                MethodCall method = lookupObjectMethod(leftType, operatorOverloadingMethod, rightType.nullable(false));
+                if (method == null) {
+                    method = lookupObjectMethod(rightType, operatorOverloadingMethod + 'R', leftType.nullable(false));
+                }
+                if (method == null) {
+                    error(
+                        "Could not find operator-overloading method for " + binExpr.type +
+                        " with operands " + leftType.getName() + " and " + rightType.getName(),
+                        binExpr
+                    );
+                    resultType = EvaluatedType.NULL;
+                } else {
+                    methodCalls.put(binExpr, method);
+                    resultType = method.getReturnType();
+                }
             }
         } else if (expr instanceof ReservedIdentifierExpression) {
             ReservedIdentifierExpression reservedExpr = (ReservedIdentifierExpression)expr;
@@ -579,6 +605,21 @@ public final class Typechecker {
 
     private void warning(String message, ASTNode node) {
         problemCollector.warning(message, node.row, node.column);
+    }
+
+    private MethodCall lookupObjectMethod(EvaluatedType targetType, String name, EvaluatedType... argTypes) {
+        MethodCall method;
+        CtClass clazz = targetType.getJavassist();
+        {
+            EvaluatedType[] lookupTypes = new EvaluatedType[argTypes.length + 1];
+            lookupTypes[0] = targetType;
+            System.arraycopy(argTypes, 0, lookupTypes, 1, argTypes.length);
+            method = lookupStaticMethod(name, lookupTypes, true);
+        }
+        if (method == null) {
+            method = new MethodCall(findMethod(clazz, name, true, false, null, argTypes));
+        }
+        return method;
     }
 
     private MethodCall lookupStaticMethod(String name, EvaluatedType[] argTypes, boolean isExtension) {
