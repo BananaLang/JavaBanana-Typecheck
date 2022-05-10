@@ -424,6 +424,20 @@ public final class Typechecker {
                 }
             }
             if (method == null) {
+                EvaluatedType leftType = evaluateExpression(ce.target);
+                if (leftType == EvaluatedType.NULL) {
+                    error("Literal null is not callable", ce);
+                } else {
+                    if (leftType.isNullable()) {
+                        error("Cannot call nullable value", ce);
+                    }
+                    method = new MethodCall(
+                        findFunctionalInterfaceMethodRecursive(leftType.getJavassist(), argTypes)
+                    );
+                    methodReturnType = method.getReturnType();
+                }
+            }
+            if (method == null) {
                 StringBuilder error = new StringBuilder("Could not find method compatible with ");
                 if (ce.target instanceof AccessExpression) {
                     AccessExpression ae = (AccessExpression)ce.target;
@@ -764,7 +778,9 @@ public final class Typechecker {
         } catch (NotFoundException e) {
             throw new TypeCheckFailure(e);
         }
-        StringBuilder error = new StringBuilder("Unable to find method ").append(name).append('(');
+        StringBuilder error = new StringBuilder("Unable to find method ")
+            .append(name)
+            .append('(');
         for (int i = 0; i < argTypes.length; i++) {
             if (i > 0) {
                 error.append(", ");
@@ -785,6 +801,52 @@ public final class Typechecker {
         EvaluatedType... argTypes
     ) {
         return findMethod(clazz.getMethods(), name, checkName, staticOnly, check, returnNull, argTypes);
+    }
+
+    private static CtMethod findFunctionalInterfaceMethodRecursive(CtClass clazz, EvaluatedType... args) {
+        CtMethod[] result = new CtMethod[1];
+        forEachSuperclass(clazz, c -> {
+            CtMethod method = InformationLookup.getFunctionalInterfaceMethod(c);
+            if (method != null) {
+                if (result[0] != null) {
+                    StringBuilder error = new StringBuilder("Multiple compatible functional interfaces found for ")
+                        .append(clazz.getName())
+                        .append('(');
+                    for (int i = 0; i < args.length; i++) {
+                        if (i > 0) {
+                            error.append(", ");
+                        }
+                        error.append(args[i].getName());
+                    }
+                    error.append(')');
+                    throw new TypeCheckFailure(error.toString());
+                }
+                result[0] = findMethod(
+                    new CtMethod[] {method},
+                    method.getName(),
+                    false,
+                    false,
+                    m -> !Modifier.isStatic(m.getModifiers()),
+                    true,
+                    args
+                );
+            }
+            return false;
+        });
+        if (result[0] == null) {
+            StringBuilder error = new StringBuilder("No compatible functional interfaces found for ")
+                .append(clazz.getName())
+                .append('(');
+            for (int i = 0; i < args.length; i++) {
+                if (i > 0) {
+                    error.append(", ");
+                }
+                error.append(args[i].getName());
+            }
+            error.append(')');
+            throw new TypeCheckFailure(error.toString());
+        }
+        return result[0];
     }
 
     private static boolean isAccessible(CtMethod method) {

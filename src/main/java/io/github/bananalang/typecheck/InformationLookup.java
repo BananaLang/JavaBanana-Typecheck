@@ -1,8 +1,10 @@
 package io.github.bananalang.typecheck;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -12,6 +14,7 @@ import javassist.CtConstructor;
 import javassist.CtField;
 import javassist.CtMember;
 import javassist.CtMethod;
+import javassist.Modifier;
 import javassist.NotFoundException;
 
 public final class InformationLookup {
@@ -185,5 +188,34 @@ public final class InformationLookup {
             return result;
         });
         return Arrays.copyOf(cachedResult, cachedResult.length);
+    }
+
+    public static CtMethod getFunctionalInterfaceMethod(CtClass clazz) {
+        if (!clazz.isInterface()) {
+            return null;
+        }
+        CtMethod result = null;
+        for (CtMethod method : clazz.getDeclaredMethods()) {
+            int modifiers = method.getModifiers();
+            if (!Modifier.isAbstract(modifiers)) continue;
+            if (result == null) {
+                result = method;
+            } else {
+                return null;
+            }
+        }
+        return result;
+    }
+
+    public static CtMethod[] findFunctionalInterfaceMethods(CtClass clazz) {
+        List<CtMethod> result = new ArrayList<>();
+        Typechecker.forEachSuperclass(clazz, c -> {
+            CtMethod method = getFunctionalInterfaceMethod(c);
+            if (method != null) {
+                result.add(method);
+            }
+            return true;
+        });
+        return result.toArray(new CtMethod[result.size()]);
     }
 }

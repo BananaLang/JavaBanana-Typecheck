@@ -1,7 +1,10 @@
 package io.github.bananalang;
 
 import java.io.IOException;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
+import banana.internal.annotation.NonNull;
 import io.github.bananalang.compilecommon.problems.GenericCompilationFailureException;
 import io.github.bananalang.compilecommon.problems.ProblemCollector;
 import io.github.bananalang.parse.Parser;
@@ -16,9 +19,11 @@ public class TypeTest {
 
         try {
             StatementList root = new Parser(
-                "import java.util.Arrays;\n" +
-                "def var testList = Arrays.asList(\"Hello,\", \"World!\", \"Banana\");\n" +
-                "println(testList);\n",
+                "import io.github.bananalang.TypeTest.TEST_SUPPLIER;\n" +
+                "import io.github.bananalang.TypeTest.REVERSER;\n" +
+                "def var testVar = TEST_SUPPLIER();\n" +
+                "println(testVar);\n" +
+                "println(REVERSER(testVar));\n",
                 problemCollector
             ).parse();
 
@@ -31,4 +36,9 @@ public class TypeTest {
         System.out.println();
         System.out.println(problemCollector.ansiFormattedString());
     }
+
+    @NonNull
+    public static final Supplier<String> TEST_SUPPLIER = () -> "Hello";
+    @NonNull
+    public static final Function<String, String> REVERSER = s -> new StringBuilder(s).reverse().toString();
 }
