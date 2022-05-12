@@ -35,6 +35,7 @@ import io.github.bananalang.parse.ast.VariableDeclarationStatement;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.TypeReference;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.VariableDeclaration;
 import io.github.bananalang.typecheck.Imported.ImportType;
+import io.github.bananalang.typecheck.MethodCall.CallType;
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.CtField;
@@ -251,16 +252,23 @@ public final class Typechecker {
         } else if (root instanceof IfOrWhileStatement) {
             IfOrWhileStatement ifOrWhileStmt = (IfOrWhileStatement)root;
             EvaluatedType conditionType = evaluateExpression(ifOrWhileStmt.condition);
-            CtMethod method;
+            MethodCall method;
             if (conditionType == EvaluatedType.NULL) {
                 method = null;
             } else {
                 try {
-                    method = conditionType.getJavassist().getMethod("truthy", "()Z");
-                } catch (NotFoundException e) {
+                    // method = conditionType.getJavassist().getMethod("truthy", "()Z");
+                    method = lookupObjectMethod(conditionType, "truthy");
+                    if (!method.getReturnType().getName().equals("boolean")) {
+                        error("truthy() doesn't return a boolean", ifOrWhileStmt.condition);
+                    }
+                } catch (TypeCheckFailure e) {
                     try {
-                        method = conditionType.getJavassist().getMethod("isEmpty", "()Z");
-                    } catch (NotFoundException e2) {
+                        method = lookupObjectMethod(conditionType, "isEmpty");
+                        if (!method.getReturnType().getName().equals("boolean")) {
+                            error("isEmpty() doesn't return a boolean", ifOrWhileStmt.condition);
+                        }
+                    } catch (TypeCheckFailure e2) {
                         method = null; // Null check *only*
                         if (!conditionType.isNullable()) {
                             warning(
@@ -274,7 +282,7 @@ public final class Typechecker {
                     }
                 }
             }
-            methodCalls.put(ifOrWhileStmt, ifNotNull(method, MethodCall::new));
+            methodCalls.put(ifOrWhileStmt, method);
             typecheck0(ifOrWhileStmt.body);
             if (ifOrWhileStmt.elseBody != null) {
                 typecheck0(ifOrWhileStmt.elseBody);
@@ -392,7 +400,7 @@ public final class Typechecker {
                             argTypes
                         );
                         if (foundMethod != null) {
-                            method = new MethodCall(foundMethod, false);
+                            method = new MethodCall(foundMethod, CallType.STATIC);
                             methodReturnType = method.getReturnType();
                         }
                     }
@@ -432,7 +440,8 @@ public final class Typechecker {
                         error("Cannot call nullable value", ce);
                     }
                     method = new MethodCall(
-                        findFunctionalInterfaceMethodRecursive(leftType.getJavassist(), argTypes)
+                        findFunctionalInterfaceMethodRecursive(leftType.getJavassist(), argTypes),
+                        CallType.FUNCTIONAL
                     );
                     methodReturnType = method.getReturnType();
                 }
@@ -663,8 +672,10 @@ public final class Typechecker {
             method = lookupStaticMethod(name, lookupTypes, true);
         }
         if (method == null) {
-            method = new MethodCall(findMethod(clazz, name, true, false, null, false, argTypes));
-            if (method.isStaticInvocation()) {
+            method = new MethodCall(
+                findMethod(clazz, name, true, false, null, false, argTypes)
+            );
+            if (method.getCallType() == CallType.STATIC) {
                 warning("Calling a static method on an instance");
             }
         }
@@ -673,6 +684,7 @@ public final class Typechecker {
 
     private MethodCall lookupStaticMethod(String name, EvaluatedType[] argTypes, boolean isExtension) {
         List<ScriptMethod> checkMethods = definedMethods.get(name);
+        CallType callType = isExtension ? CallType.EXTENSION : CallType.STATIC;
         if (checkMethods != null) {
             searchDefinitionsLoop:
             for (ScriptMethod checkMethod : checkMethods) {
@@ -695,7 +707,7 @@ public final class Typechecker {
                         name + ") with an inferred return type"
                     );
                 }
-                return new MethodCall(checkMethod);
+                return new MethodCall(checkMethod, callType);
             }
         }
         {
@@ -712,7 +724,7 @@ public final class Typechecker {
                         isExtension ? CHECK_IS_EXTENSION : CHECK_IS_NOT_EXTENSION,
                         false,
                         argTypes
-                    ), isExtension);
+                    ), callType);
                 } catch (NotFoundException e) {
                     throw new TypeCheckFailure(e);
                 }

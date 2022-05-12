@@ -6,28 +6,40 @@ import javassist.Modifier;
 import javassist.NotFoundException;
 
 public final class MethodCall {
+    public static enum CallType {
+        INSTANCE, STATIC, EXTENSION, FUNCTIONAL
+    }
+
     public static final String EXTENSION_METHOD_ANNOTATION = "banana.internal.annotation.ExtensionMethod";
 
     private final ScriptMethod scriptMethod;
     private final CtMethod javaMethod;
+    private final CallType callType;
     private EvaluatedType returnType = null;
     private EvaluatedType[] argTypes = null;
-    private Boolean isExtensionMethod = null;
     private Boolean isStaticInvocation = null;
 
-    public MethodCall(ScriptMethod method) {
+    public MethodCall(ScriptMethod method, CallType callMode) {
         scriptMethod = method;
         javaMethod = null;
+        this.callType = callMode;
+    }
+
+    public MethodCall(CtMethod method, CallType callType) {
+        scriptMethod = null;
+        javaMethod = method;
+        this.callType = callType;
     }
 
     public MethodCall(CtMethod method) {
         scriptMethod = null;
         javaMethod = method;
-    }
-
-    MethodCall(CtMethod method, Boolean isExtensionMethod) {
-        this(method);
-        this.isExtensionMethod = isExtensionMethod;
+        this.callType =
+            InformationLookup.hasAnnotation(method, EXTENSION_METHOD_ANNOTATION)
+                ? CallType.EXTENSION
+                : isStaticInvocation()
+                    ? CallType.STATIC
+                    : CallType.INSTANCE;
     }
 
     public ScriptMethod getScriptMethod() {
@@ -93,15 +105,8 @@ public final class MethodCall {
         }
     }
 
-    public boolean isExtensionMethod() {
-        if (isExtensionMethod != null) {
-            return isExtensionMethod;
-        }
-        if (isScriptMethod()) {
-            return isExtensionMethod = scriptMethod.getModifiers().contains(Modifier2.EXTENSION);
-        } else {
-            return isExtensionMethod = javaMethod.hasAnnotation(EXTENSION_METHOD_ANNOTATION);
-        }
+    public CallType getCallType() {
+        return callType;
     }
 
     public boolean isStaticInvocation() {

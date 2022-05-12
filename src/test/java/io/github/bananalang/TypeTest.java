@@ -14,6 +14,11 @@ import javassist.ClassPool;
 import javassist.LoaderClassPath;
 
 public class TypeTest {
+    @NonNull
+    public static final Supplier<String> TEST_SUPPLIER = () -> "Hello";
+    @NonNull
+    public static final Function<String, String> REVERSER = s -> new StringBuilder(s).reverse().toString();
+
     public static void main(String[] args) throws IOException {
         ProblemCollector problemCollector = new ProblemCollector();
 
@@ -36,9 +41,4 @@ public class TypeTest {
         System.out.println();
         System.out.println(problemCollector.ansiFormattedString());
     }
-
-    @NonNull
-    public static final Supplier<String> TEST_SUPPLIER = () -> "Hello";
-    @NonNull
-    public static final Function<String, String> REVERSER = s -> new StringBuilder(s).reverse().toString();
 }
