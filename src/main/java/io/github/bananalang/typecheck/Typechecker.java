@@ -32,6 +32,7 @@ import io.github.bananalang.parse.ast.ReturnStatement;
 import io.github.bananalang.parse.ast.StatementList;
 import io.github.bananalang.parse.ast.StatementNode;
 import io.github.bananalang.parse.ast.StringExpression;
+import io.github.bananalang.parse.ast.UnaryExpression;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.TypeReference;
 import io.github.bananalang.parse.ast.VariableDeclarationStatement.VariableDeclaration;
@@ -642,6 +643,19 @@ public final class Typechecker {
             resultType = evaluateType(castExpr.type).nullable(
                 castExpr.type.nullable || targetType.isNullable()
             );
+        } else if (expr instanceof UnaryExpression) {
+            UnaryExpression unaryExpr = (UnaryExpression)expr;
+            EvaluatedType targetType = evaluateExpression(unaryExpr.value);
+            switch (unaryExpr.type) {
+                case ASSERT_NONNULL:
+                    if (!targetType.isNullable()) {
+                        warning("Asserting a non-null type to be non-null does nothing.", unaryExpr);
+                    }
+                    resultType = targetType.nullable(false);
+                    break;
+                default:
+                    throw new TypeCheckFailure("Typechecking of " + unaryExpr.type + " operator not supported yet");
+            }
         } else if (expr instanceof StringExpression) {
             resultType = ET_JLS;
         } else {

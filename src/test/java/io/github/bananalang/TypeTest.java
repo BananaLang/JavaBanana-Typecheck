@@ -14,7 +14,6 @@ import javassist.ClassPool;
 import javassist.LoaderClassPath;
 
 public class TypeTest {
-    @NonNull
     public static final Supplier<String> TEST_SUPPLIER = () -> "Hello";
     @NonNull
     public static final Function<String, String> REVERSER = s -> new StringBuilder(s).reverse().toString();
@@ -26,9 +25,9 @@ public class TypeTest {
             StatementList root = new Parser(
                 "import io.github.bananalang.TypeTest.TEST_SUPPLIER;\n" +
                 "import io.github.bananalang.TypeTest.REVERSER;\n" +
-                "def var testVar = (String)TEST_SUPPLIER();\n" +
+                "def var testVar = (String?)TEST_SUPPLIER!!();\n" +
                 "println(testVar);\n" +
-                "println((String)REVERSER(testVar));\n",
+                "println((String)REVERSER(testVar)!!);\n",
                 problemCollector
             ).parse();
 
