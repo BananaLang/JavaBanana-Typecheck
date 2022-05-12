@@ -596,9 +596,9 @@ public final class Typechecker {
                     error("Right-hand side of " + binExpr.type + " cannot be nullable", binExpr.right);
                 }
                 MethodCall method = lookupObjectMethod(leftType, operatorOverloadingMethod, rightType.nullable(false));
-                if (method == null) {
-                    method = lookupObjectMethod(rightType, operatorOverloadingMethod + 'R', leftType.nullable(false));
-                }
+                // if (method == null) {
+                //     method = lookupObjectMethod(rightType, operatorOverloadingMethod + 'R', leftType.nullable(false));
+                // }
                 if (method == null) {
                     error(
                         "Could not find operator-overloading method for " + binExpr.type +
