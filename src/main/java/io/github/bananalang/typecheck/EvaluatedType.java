@@ -27,6 +27,13 @@ public final class EvaluatedType {
         javassistClass = clazz;
     }
 
+    private EvaluatedType(ClassPool cp, String name, boolean nullable, CtClass javassistClass) {
+        this.cp = cp;
+        this.name = name;
+        this.nullable = nullable;
+        this.javassistClass = javassistClass;
+    }
+
     public String getName() {
         return name;
     }
@@ -47,16 +54,12 @@ public final class EvaluatedType {
     }
 
     public EvaluatedType nullable(boolean nullable) {
-        if (this == NULL) {
+        if (this == NULL || nullable == this.nullable || name.equals("void")) {
             return this;
         }
-        if (name.equals("void")) {
-            return this;
-        }
-        if (nullable == this.nullable) {
-            return this;
-        }
-        return new EvaluatedType(getJavassist(), nullable);
+        // Call getJavassist() to evaluate the type now once, rather than potentially doing it twice
+        // (once for this and once for the copy) later.
+        return new EvaluatedType(cp, name, nullable, getJavassist());
     }
 
     private CtClass evaluate() {

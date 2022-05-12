@@ -631,8 +631,17 @@ public final class Typechecker {
             }
         } else if (expr instanceof CastExpression) {
             CastExpression castExpr = (CastExpression)expr;
-            evaluateExpression(castExpr.target);
-            resultType = evaluateType(castExpr.type);
+            EvaluatedType targetType = evaluateExpression(castExpr.target);
+            if (!castExpr.type.nullable && targetType.isNullable()) {
+                warning(
+                    "Casting to a type without a nullable indicator means to keep the types nullability. " +
+                    "If you wwish to cast a nullable type to a non-nullable one, please use !! instead.",
+                    castExpr
+                );
+            }
+            resultType = evaluateType(castExpr.type).nullable(
+                castExpr.type.nullable || targetType.isNullable()
+            );
         } else if (expr instanceof StringExpression) {
             resultType = ET_JLS;
         } else {
