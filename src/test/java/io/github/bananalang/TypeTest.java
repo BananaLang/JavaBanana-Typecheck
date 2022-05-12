@@ -26,9 +26,9 @@ public class TypeTest {
             StatementList root = new Parser(
                 "import io.github.bananalang.TypeTest.TEST_SUPPLIER;\n" +
                 "import io.github.bananalang.TypeTest.REVERSER;\n" +
-                "def var testVar = TEST_SUPPLIER();\n" +
+                "def var testVar = (String)TEST_SUPPLIER();\n" +
                 "println(testVar);\n" +
-                "println(REVERSER(testVar));\n",
+                "println((String)REVERSER(testVar));\n",
                 problemCollector
             ).parse();
 

@@ -20,6 +20,7 @@ import io.github.bananalang.parse.ast.AccessExpression;
 import io.github.bananalang.parse.ast.AssignmentExpression;
 import io.github.bananalang.parse.ast.BinaryExpression;
 import io.github.bananalang.parse.ast.CallExpression;
+import io.github.bananalang.parse.ast.CastExpression;
 import io.github.bananalang.parse.ast.ExpressionNode;
 import io.github.bananalang.parse.ast.ExpressionStatement;
 import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
@@ -628,6 +629,10 @@ public final class Typechecker {
                 default:
                     throw new AssertionError();
             }
+        } else if (expr instanceof CastExpression) {
+            CastExpression castExpr = (CastExpression)expr;
+            evaluateExpression(castExpr.target);
+            resultType = evaluateType(castExpr.type);
         } else if (expr instanceof StringExpression) {
             resultType = ET_JLS;
         } else {
