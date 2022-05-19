@@ -27,6 +27,7 @@ import io.github.bananalang.parse.ast.FunctionDefinitionStatement;
 import io.github.bananalang.parse.ast.IdentifierExpression;
 import io.github.bananalang.parse.ast.IfOrWhileStatement;
 import io.github.bananalang.parse.ast.ImportStatement;
+import io.github.bananalang.parse.ast.IntegerExpression;
 import io.github.bananalang.parse.ast.ReservedIdentifierExpression;
 import io.github.bananalang.parse.ast.ReturnStatement;
 import io.github.bananalang.parse.ast.StatementList;
@@ -51,18 +52,20 @@ public final class Typechecker {
     private static final Predicate<CtMethod> CHECK_IS_EXTENSION =
         m -> InformationLookup.hasAnnotation(m, MethodCall.EXTENSION_METHOD_ANNOTATION);
     private static final Predicate<CtMethod> CHECK_IS_NOT_EXTENSION = CHECK_IS_EXTENSION.negate();
-    static final CtClass CT_JLO, CT_JLS;
-    private static final EvaluatedType ET_JLS, ET_VOID;
+    static final CtClass CT_JLO, CT_JLS, CT_BBI;
+    private static final EvaluatedType ET_JLS, ET_BBI, ET_VOID;
 
     static {
         try {
             ClassPool cp = ClassPool.getDefault();
             CT_JLO = cp.get("java.lang.Object");
             CT_JLS = cp.get("java.lang.String");
+            CT_BBI = cp.get("banana.builtin.Int");
         } catch (NotFoundException e) {
             throw new Error(e);
         }
         ET_JLS = new EvaluatedType(CT_JLS, false);
+        ET_BBI = new EvaluatedType(CT_BBI, false);
         ET_VOID = new EvaluatedType(CtPrimitiveType.voidType, false);
     }
 
@@ -586,7 +589,7 @@ public final class Typechecker {
                 case DIVIDE: operatorOverloadingMethod = "divide"; break;
                 case MODULUS: operatorOverloadingMethod = "remainder"; break;
                 default:
-                    throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet");
+                    throw new TypeCheckFailure("Typechecking of " + binExpr.type + " operator not supported yet", binExpr);
             }
             if (operatorOverloadingMethod != null) {
                 if (leftType.isNullable()) {
@@ -654,12 +657,14 @@ public final class Typechecker {
                     resultType = targetType.nullable(false);
                     break;
                 default:
-                    throw new TypeCheckFailure("Typechecking of " + unaryExpr.type + " operator not supported yet");
+                    throw new TypeCheckFailure("Typechecking of " + unaryExpr.type + " operator not supported yet", unaryExpr);
             }
         } else if (expr instanceof StringExpression) {
             resultType = ET_JLS;
+        } else if (expr instanceof IntegerExpression) {
+            resultType = ET_BBI;
         } else {
-            throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet");
+            throw new TypeCheckFailure("Typechecking of " + expr.getClass().getSimpleName() + " not supported yet", expr);
         }
         types.put(expr, resultType);
         return resultType;
@@ -743,18 +748,22 @@ public final class Typechecker {
             if (imported != null && imported.getType() == ImportType.STATIC_METHOD) {
                 @SuppressWarnings("unchecked")
                 Imported<CtMethod> methodImport = (Imported<CtMethod>)imported;
+                CtMethod method;
                 try {
-                    return new MethodCall(findMethod(
+                    method = findMethod(
                         methodImport.getOwnedClass().getDeclaredMethods(name),
                         name,
                         false,
                         true,
                         isExtension ? CHECK_IS_EXTENSION : CHECK_IS_NOT_EXTENSION,
-                        false,
+                        true,
                         argTypes
-                    ), callType);
+                    );
                 } catch (NotFoundException e) {
                     throw new TypeCheckFailure(e);
+                }
+                if (method != null) {
+                    return new MethodCall(method, callType);
                 }
             }
         }
@@ -818,6 +827,7 @@ public final class Typechecker {
         } catch (NotFoundException e) {
             throw new TypeCheckFailure(e);
         }
+        if (returnNull) return null;
         StringBuilder error = new StringBuilder("Unable to find method ")
             .append(name)
             .append('(');
